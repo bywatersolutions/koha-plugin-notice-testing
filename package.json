@@ -14,6 +14,10 @@
   },
   "author": "Lisette Scheer <lisette@bywatersolutions.com>",
   "license": "GPL-3.0",
+  "devDependencies": {
+    "gulp": "^5.0.0",
+    "vinyl": "^3.0.0"
+  },
   "bugs": {
     "url": "https://github.com/bywatersolutions/koha-plugin-notice-testing/issues"
   },

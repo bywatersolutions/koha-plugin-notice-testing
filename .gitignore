@@ -1,0 +1,4 @@
+node_modules
+*.kpz
+junit.xml
+*.bak

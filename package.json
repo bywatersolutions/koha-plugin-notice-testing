@@ -1,0 +1,21 @@
+{
+  "name": "koha-plugin-notice-testing",
+  "version": "0.1.0",
+  "description": "Notice editor improvements for Koha 26.05 and 26.11: Template Toolkit field picker, and checks before saving notices",
+  "scripts": {
+    "preversion": "sed -i -e \"s/^our \\$VERSION .*/our \\$VERSION         = \\\"$npm_new_version\\\";/\" Koha/Plugin/Com/ByWaterSolutions/NoticeEditor.pm; perl scripts/stamp-changelog.pl v$npm_new_version; git add -u; rm -f Koha/Plugin/Com/ByWaterSolutions/NoticeEditor.pm-e",
+    "postversion": "perl scripts/open-next-changelog.pl v$npm_package_version; git add CHANGELOG.md; git commit -m 'Open next development cycle'",
+    "kpz": "echo -n ${npm_package_name}-v${npm_package_version}.kpz",
+    "print-name": "echo -n ${npm_package_name}"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bywatersolutions/koha-plugin-notice-testing.git"
+  },
+  "author": "Lisette Scheer <lisette@bywatersolutions.com>",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/bywatersolutions/koha-plugin-notice-testing/issues"
+  },
+  "homepage": "https://github.com/bywatersolutions/koha-plugin-notice-testing#readme"
+}

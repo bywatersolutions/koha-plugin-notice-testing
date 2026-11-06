@@ -1,0 +1,492 @@
+{
+    "/validation": {
+        "post": {
+            "x-mojo-to": "Com::ByWaterSolutions::NoticeEditor::Controller#validate",
+            "operationId": "noticeEditorValidateTemplates",
+            "tags": [
+                "notice_editor"
+            ],
+            "summary": "Check notice templates for problems, without saving them",
+            "description": "Checks the templates of a notice, e.g. for Template Toolkit syntax errors,\nas the notice editor does before saving them. Templates without a title\nor a content are not checked.\n",
+            "parameters": [
+                {
+                    "name": "body",
+                    "in": "body",
+                    "description": "The notice and its templates",
+                    "required": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "module": {
+                                "type": "string",
+                                "description": "Module of the notice (e.g. `circulation`)"
+                            },
+                            "code": {
+                                "type": "string",
+                                "description": "Code of the notice (e.g. `ODUE`)"
+                            },
+                            "templates": {
+                                "type": "array",
+                                "description": "Templates of the notice, one for each transport type and language",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message_transport_type": {
+                                            "type": "string",
+                                            "description": "Transport type of the template (e.g. `email`)"
+                                        },
+                                        "lang": {
+                                            "type": "string",
+                                            "description": "Language of the template (e.g. `default`)"
+                                        },
+                                        "title": {
+                                            "type": "string",
+                                            "description": "Subject of the template"
+                                        },
+                                        "content": {
+                                            "type": "string",
+                                            "description": "Body of the template"
+                                        }
+                                    },
+                                    "required": [
+                                        "message_transport_type",
+                                        "lang"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": [
+                            "module",
+                            "templates"
+                        ],
+                        "additionalProperties": false
+                    }
+                }
+            ],
+            "consumes": [
+                "application/json"
+            ],
+            "produces": [
+                "application/json"
+            ],
+            "responses": {
+                "200": {
+                    "description": "The problems found in each template that was checked",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "templates": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "message_transport_type": {
+                                            "type": "string",
+                                            "description": "Transport type of the template"
+                                        },
+                                        "lang": {
+                                            "type": "string",
+                                            "description": "Language of the template"
+                                        },
+                                        "problems": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "description": "A problem found in a notice template",
+                                                "properties": {
+                                                    "type": {
+                                                        "type": "string",
+                                                        "description": "The kind of problem:\n\n* `tt_syntax`: the Template Toolkit markup cannot be parsed\n* `unclosed_tag`: a `[%` has no matching `%]`\n* `tt_error`: processing the template without data fails\n* `missing_repeatable_content`: the notice receives a list of records,\n  but the template has nothing to list them with\n* `unknown_variable`: a variable the notice does not receive\n* `unknown_method`: a field or method that does not exist on an object\n* `missing_plugin`: a plugin used without being loaded\n* `unknown_block`: a block processed but not defined\n"
+                                                    },
+                                                    "severity": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "error",
+                                                            "warning"
+                                                        ],
+                                                        "description": "`error` if the notice cannot be generated, `warning` if it can but will not show what is expected"
+                                                    },
+                                                    "field": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "title",
+                                                            "content"
+                                                        ],
+                                                        "description": "The part of the template the problem is in"
+                                                    },
+                                                    "lines": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "integer"
+                                                        },
+                                                        "description": "The lines of the field the problem is on"
+                                                    },
+                                                    "error": {
+                                                        "type": "string",
+                                                        "description": "The Template Toolkit error message"
+                                                    },
+                                                    "loop": {
+                                                        "type": "string",
+                                                        "description": "The Template Toolkit variable holding the records to list"
+                                                    },
+                                                    "tokens": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "The bespoke placeholders listing the records"
+                                                    },
+                                                    "tags": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "The bespoke enclosing tags whose content is repeated for each record"
+                                                    },
+                                                    "variable": {
+                                                        "type": "string",
+                                                        "description": "The variable, or the path up to the field or method, that is not available"
+                                                    },
+                                                    "class": {
+                                                        "type": "string",
+                                                        "description": "The class that has no such field or method"
+                                                    },
+                                                    "suggestion": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ],
+                                                        "description": "A variable the notice receives holding the same kind of object"
+                                                    },
+                                                    "available": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "The variables the notice receives"
+                                                    },
+                                                    "plugin": {
+                                                        "type": "string",
+                                                        "description": "The plugin used without being loaded"
+                                                    },
+                                                    "block": {
+                                                        "type": "string",
+                                                        "description": "The block processed but not defined"
+                                                    }
+                                                },
+                                                "additionalProperties": false,
+                                                "required": [
+                                                    "type",
+                                                    "severity"
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "message_transport_type",
+                                        "lang",
+                                        "problems"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": [
+                            "templates"
+                        ],
+                        "additionalProperties": false
+                    }
+                },
+                "400": {
+                    "description": "Bad request",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "401": {
+                    "description": "Authentication required",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "403": {
+                    "description": "Access forbidden",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "500": {
+                    "description": "Internal server error. Possible `error_code` attribute values:\n\n* `internal_server_error`\n",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "503": {
+                    "description": "Under maintenance",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "x-koha-authorization": {
+                "permissions": {
+                    "tools": "edit_notices"
+                }
+            }
+        }
+    },
+    "/fields": {
+        "get": {
+            "x-mojo-to": "Com::ByWaterSolutions::NoticeEditor::Controller#fields",
+            "operationId": "noticeEditorListFields",
+            "tags": [
+                "notice_editor"
+            ],
+            "summary": "List the fields the notice editor offers to insert in a notice",
+            "parameters": [
+                {
+                    "name": "module",
+                    "in": "query",
+                    "type": "string",
+                    "required": true,
+                    "description": "Module of the notice"
+                },
+                {
+                    "name": "code",
+                    "in": "query",
+                    "type": "string",
+                    "required": false,
+                    "description": "Code of the notice"
+                }
+            ],
+            "produces": [
+                "application/json"
+            ],
+            "responses": {
+                "200": {
+                    "description": "The fields, and the syntaxes the notice can use",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "fields": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {
+                                            "type": "string",
+                                            "description": "Text shown in the list"
+                                        },
+                                        "syntax": {
+                                            "type": "string",
+                                            "enum": [
+                                                "tt",
+                                                "bespoke",
+                                                "both"
+                                            ],
+                                            "description": "Syntaxes the field can be inserted with"
+                                        },
+                                        "tt": {
+                                            "type": "string",
+                                            "description": "Template Toolkit text to insert"
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "Name to insert as <<value>> with the bespoke syntax"
+                                        },
+                                        "bespoke": {
+                                            "type": "string",
+                                            "description": "Bespoke text to insert, when it is not <<value>>"
+                                        },
+                                        "use": {
+                                            "type": "string",
+                                            "description": "Template Toolkit plugin the field needs loaded"
+                                        },
+                                        "fallback": {
+                                            "type": "boolean",
+                                            "description": "Only the bespoke syntax can use the field in the notice"
+                                        }
+                                    },
+                                    "required": [
+                                        "text",
+                                        "syntax"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "insert_syntaxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "tt",
+                                        "bespoke",
+                                        "mixed"
+                                    ]
+                                }
+                            },
+                            "only_bespoke": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "fields",
+                            "insert_syntaxes",
+                            "only_bespoke"
+                        ],
+                        "additionalProperties": false
+                    }
+                },
+                "400": {
+                    "description": "Bad request",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "401": {
+                    "description": "Authentication required",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "403": {
+                    "description": "Access forbidden",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "500": {
+                    "description": "Internal server error. Possible `error_code` attribute values:\n\n* `internal_server_error`\n",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "503": {
+                    "description": "Under maintenance",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "x-koha-authorization": {
+                "permissions": {
+                    "tools": "edit_notices"
+                }
+            }
+        }
+    }
+}

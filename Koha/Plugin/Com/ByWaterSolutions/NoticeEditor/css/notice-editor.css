@@ -1,0 +1,70 @@
+/* Koha notice editor plugin: copy of the styles added to tools/letter.tt by
+ * Koha bugs 36588, 39716 and 43395. Keep them in sync. */
+
+/* Choice of the syntax to insert fields with, one per line: undo the label styles of fieldset.rows */
+fieldset.rows .insert_syntax label {
+    display: block;
+    float: none;
+    font-weight: normal;
+    margin: 0;
+    text-align: left;
+    white-space: nowrap;
+    width: auto;
+}
+fieldset.rows .insert_syntax .hint {
+    margin: 0.3rem 0 0 0;
+    max-width: 22em;
+}
+/* Problems found when checking a template: undo the list styles of fieldset.rows */
+.template_problems .alert ul {
+    margin: 0.25em 0 0 0;
+    padding-left: 1.5em;
+}
+fieldset.rows .template_problems li,
+#template_problems_modal li {
+    border: 0;
+    clear: none;
+    float: none;
+    list-style-type: disc;
+    padding: 0.15em 0;
+    width: auto;
+}
+.template_problems .alert {
+    margin-bottom: 0.5em;
+}
+.template_problems .problem_location {
+    color: #555;
+    white-space: nowrap;
+}
+.template_problems .more_variables[hidden] {
+    display: none;
+}
+/* Line numbers shown next to the message body when problems are on given lines */
+.content_with_gutter {
+    display: flex;
+    align-items: flex-start;
+}
+.line_gutter {
+    background-color: #f3f3f3;
+    border: 1px solid #ccc;
+    border-right: 0;
+    box-sizing: border-box;
+    color: #777;
+    min-width: 3em;
+    overflow: hidden;
+    text-align: right;
+    user-select: none;
+}
+.line_gutter div {
+    padding: 0 0.4em;
+}
+.line_gutter .line_error {
+    background-color: #f8d7da;
+    color: #842029;
+    font-weight: bold;
+}
+.line_gutter .line_warning {
+    background-color: #fff3cd;
+    color: #664d03;
+    font-weight: bold;
+}

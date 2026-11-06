@@ -1,0 +1,124 @@
+{
+    "/js/notice-editor.js": {
+        "get": {
+            "x-mojo-to": "Static#get",
+            "tags": [
+                "pluginStatic"
+            ],
+            "responses": {
+                "200": {
+                    "description": "File found",
+                    "schema": {
+                        "type": "file"
+                    }
+                },
+                "400": {
+                    "description": "Bad request",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "404": {
+                    "description": "File not found",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "500": {
+                    "description": "internal server error",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "parameters": [
+                {
+                    "name": "v",
+                    "in": "query",
+                    "type": "string",
+                    "required": false,
+                    "description": "Version of the plugin, so that browsers load the new file after an upgrade"
+                }
+            ]
+        }
+    },
+    "/css/notice-editor.css": {
+        "get": {
+            "x-mojo-to": "Static#get",
+            "tags": [
+                "pluginStatic"
+            ],
+            "responses": {
+                "200": {
+                    "description": "File found",
+                    "schema": {
+                        "type": "file"
+                    }
+                },
+                "400": {
+                    "description": "Bad request",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "404": {
+                    "description": "File not found",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "500": {
+                    "description": "internal server error",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "description": "An explanation for the error",
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "parameters": [
+                {
+                    "name": "v",
+                    "in": "query",
+                    "type": "string",
+                    "required": false,
+                    "description": "Version of the plugin, so that browsers load the new file after an upgrade"
+                }
+            ]
+        }
+    }
+}

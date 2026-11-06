@@ -66,7 +66,7 @@ subtest 'Variables passed to the notice' => sub {
 subtest 'Fields and methods of objects' => sub {
     plan tests => 5;
 
-    SKIP: {
+SKIP: {
         skip 'No checkouts relationship for patrons in this Koha version', 1
             unless Koha::Schema::Result::Borrower->has_relationship('checkouts');
         is_deeply(
@@ -144,11 +144,21 @@ subtest 'Blocks' => sub {
 };
 
 subtest 'Notices whose variables are not known' => sub {
-    plan tests => 3;
+    plan tests => 5;
 
     my $validator = NoticeEditor::Validator->new( { module => 'not_a_module', code => 'X' } );
     ok( !$validator->knows_variables, 'Unknown module' );
-    is_deeply( $validator->check_variables('[% anything.goes %]'), [], 'No problems reported' );
+    is_deeply( $validator->check_variables('[% anything.goes %]'), [], 'Variables are not reported' );
+    is_deeply(
+        problems( 'not_a_module', 'X', "[% Branches.GetName( anything ) %]\n[% 5 | \$Price %]" ),
+        [ 'missing_plugin Branches', 'missing_plugin Price' ],
+        'Plugins used without being loaded are reported'
+    );
+    is_deeply(
+        [ map { $_->{severity} } @{ $validator->check_variables("[% Branches.GetName( x ) %]\n[% 5 | \$Price %]") } ],
+        [ 'warning', 'error' ],
+        '... as an error when used as a filter'
+    );
     is_deeply( problems( 'patron_slip', 'MYSLIP', '[% IF %]' ), [], 'Templates that do not compile are not checked' );
 };
 

@@ -115,15 +115,14 @@ The template processes the block I<block>, which it does not define.
 
 =back
 
-Templates that cannot be compiled, or notices whose variables are not known,
-give no problems.
+Templates that cannot be compiled give no problems. For notices whose
+variables are not known, only plugins and blocks are checked.
 
 =cut
 
 sub check_variables {
     my ( $self, $content ) = @_;
 
-    return [] unless $self->knows_variables;
     return [] unless defined $content && $content =~ /\[%/;
 
     my $parsed = Template::Parser->new->parse($content);
@@ -133,14 +132,14 @@ sub check_variables {
 
     # Types of the variables the template can use
     my %types = (
-        %{ $self->{variables} },
+        %{ $self->{variables} || {} },
         map { $_ => { kind => 'unknown' } } NoticeEditor::Variables->globals,
     );
 
     # Variables defined by the template itself: SET, USE, MACRO, FOREACH
     while ( $code =~ m{\$stash->set\('((?:[^'\\]|\\.)*)',\s*(.*?)\);\n}gs ) {
         my ( $name, $value ) = ( $1, $2 );
-        next if exists $self->{variables}->{$name};    # Redefining a passed variable: keep its type
+        next if $self->{variables} && exists $self->{variables}->{$name};  # Redefining a passed variable: keep its type
         my ($chain) = $value =~ m{^\$stash->get\((.*)\)$}s;
         $types{$name} = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
     }
@@ -231,6 +230,10 @@ sub _resolve {
                 problem => { type => 'missing_plugin', variable => $root, plugin => $root },
             };
         }
+
+        # Without the list of the variables of the notice, it may receive any
+        return { type => { kind => 'unknown' } } unless $self->knows_variables;
+
         return {
             type    => { kind => 'unknown' },
             problem => {

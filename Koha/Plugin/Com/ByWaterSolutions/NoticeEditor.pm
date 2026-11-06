@@ -25,7 +25,7 @@ use Module::Metadata;
 
 use Koha::AuthUtils;
 
-our $VERSION         = "0.1.0";
+our $VERSION         = "0.1.1";
 our $MINIMUM_VERSION = "26.05";
 
 our $metadata = {

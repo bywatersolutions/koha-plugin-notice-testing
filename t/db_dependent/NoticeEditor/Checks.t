@@ -90,7 +90,7 @@ subtest 'repeatable_content() tests' => sub {
 };
 
 subtest 'validate() tests' => sub {
-    plan tests => 10;
+    plan tests => 13;
 
     $schema->storage->txn_begin;
 
@@ -143,6 +143,29 @@ subtest 'validate() tests' => sub {
     is_deeply(
         [ map { "$_->{type} $_->{severity}" } @$problems ], ['missing_repeatable_content warning'],
         'Overdue notice without a list of items is a problem, even if the word is in plain text'
+    );
+
+    $problems = $validate->(
+        'ODUE', 'Overdue',
+        '[%- IF overdues.count > 1 %]These items are overdue:[%- ELSE -%]This item is overdue:[%- END -%]'
+    );
+    is_deeply(
+        [ map { $_->{type} } @$problems ], ['missing_repeatable_content'],
+        'Using the list without a loop (e.g. counting) does not list the items'
+    );
+    is_deeply(
+        $validate->( 'ODUE', 'Overdue', "[% WHILE ( o = overdues.next ) %][% o.item.barcode %][% END %]" ), [],
+        'Going through the list with next is accepted'
+    );
+    is_deeply(
+        NoticeEditor::Checks->new(
+            {
+                module  => 'circulation', code => 'ODUE', message_transport_type => 'sms', title => 'Overdue',
+                content => 'You have [% overdues.count %] overdue items'
+            }
+        )->validate,
+        [],
+        'SMS templates are not required to list the items'
     );
 
     is_deeply(

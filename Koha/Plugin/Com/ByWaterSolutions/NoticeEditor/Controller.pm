@@ -52,10 +52,11 @@ sub validate {
 
             my $problems = NoticeEditor::Checks->new(
                 {
-                    module  => $body->{module},
-                    code    => $body->{code} // q{},
-                    title   => $title,
-                    content => $content,
+                    module                 => $body->{module},
+                    code                   => $body->{code} // q{},
+                    message_transport_type => $template->{message_transport_type},
+                    title                  => $title,
+                    content                => $content,
                 }
             )->validate;
 
@@ -102,7 +103,8 @@ sub fields {
             status  => 200,
             openapi => {
                 %$fields,
-                insert_syntaxes => [ sort grep { $fields->{insert_syntaxes}->{$_} } keys %{ $fields->{insert_syntaxes} } ],
+                insert_syntaxes =>
+                    [ sort grep { $fields->{insert_syntaxes}->{$_} } keys %{ $fields->{insert_syntaxes} } ],
             },
         );
     } catch {

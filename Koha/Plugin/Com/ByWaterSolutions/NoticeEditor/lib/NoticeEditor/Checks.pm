@@ -50,25 +50,27 @@ The methods are copies of those of Koha::Notice::Template (Koha bugs 39716 and
 
 =head3 new
 
-    my $checks = NoticeEditor::Checks->new( { module => $module, code => $code, title => $title, content => $content } );
+    my $checks = NoticeEditor::Checks->new(
+        { module => $module, code => $code, message_transport_type => $mtt, title => $title, content => $content } );
 
 =cut
 
 sub new {
     my ( $class, $params ) = @_;
-    return bless { map { $_ => $params->{$_} } qw( module code title content ) }, $class;
+    return bless { map { $_ => $params->{$_} } qw( module code message_transport_type title content ) }, $class;
 }
 
-=head3 module, code, title, content
+=head3 module, code, message_transport_type, title, content
 
 Accessors, as for Koha::Notice::Template
 
 =cut
 
-sub module  { return $_[0]->{module} }
-sub code    { return $_[0]->{code} }
-sub title   { return $_[0]->{title} }
-sub content { return $_[0]->{content} }
+sub module                 { return $_[0]->{module} }
+sub code                   { return $_[0]->{code} }
+sub message_transport_type { return $_[0]->{message_transport_type} }
+sub title                  { return $_[0]->{title} }
+sub content                { return $_[0]->{content} }
 
 =head3 repeatable_content
 
@@ -198,8 +200,9 @@ Toolkit error message.
 =item missing_repeatable_content
 
 The notice receives a list of records (see L</repeatable_content>) but its
-content contains neither a Template Toolkit reference to I<loop> nor one of the
-bespoke I<tokens> or I<tags>.
+content lists them neither with a Template Toolkit loop on I<loop> (FOREACH, or
+I<loop>.next) nor with one of the bespoke I<tokens> or I<tags>. SMS templates
+are not checked, as they often only give the number of records.
 
 =item unknown_variable, unknown_method, missing_plugin, unknown_block
 
@@ -247,12 +250,19 @@ sub validate {
         };
     }
 
+    # SMS templates often give the number of records instead of listing them
     my $content = $self->content // q{};
-    if ( $content ne q{} and my $repeatable = $self->repeatable_content ) {
+    if (   $content ne q{}
+        && ( $self->message_transport_type // q{} ) ne 'sms'
+        && ( my $repeatable = $self->repeatable_content ) )
+    {
         my $loop = $repeatable->{loop};
 
-        # A TT directive mentioning the loop variable, without crossing a closing %]
-        my $found = $content =~ m{\[%(?:(?!%\]).)*?\b\Q$loop\E\b}s;
+        # A loop on the records, or going through them (e.g. with WHILE), in a
+        # TT tag: using them otherwise (e.g. overdues.count) does not list them
+        ( my $tags = $content ) =~ s{(\[%.*?%\])|[^\n]}{ defined $1 ? $1 : ' ' }gse;
+        my $found = $tags =~ m{(?:\[%[-+~]?|;)\s*(?:FOREACH|FOR)\s+(?:\w+\s*(?:IN|=)\s*)?\Q$loop\E\b};
+        $found ||= $tags =~ m{\b\Q$loop\E\s*\.\s*(?:next|as_list)\b};
         $found ||= grep { $content =~ m{<<\Q$_\E>>} } @{ $repeatable->{tokens} };
         $found ||= grep { $content =~ m{<\Q$_\E>.*</\Q$_\E>}s } @{ $repeatable->{tags} };
 

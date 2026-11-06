@@ -1,6 +1,6 @@
 {
   "name": "koha-plugin-notice-testing",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Notice editor improvements for Koha 26.05 and 26.11: Template Toolkit field picker, and checks before saving notices",
   "scripts": {
     "preversion": "sed -i -e \"s/^our \\$VERSION .*/our \\$VERSION         = \\\"$npm_new_version\\\";/\" Koha/Plugin/Com/ByWaterSolutions/NoticeEditor.pm; perl scripts/stamp-changelog.pl v$npm_new_version; git add -u; rm -f Koha/Plugin/Com/ByWaterSolutions/NoticeEditor.pm-e",

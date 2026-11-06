@@ -82,8 +82,7 @@ sub for_notice {
     my %insert_syntaxes;
     my $only_bespoke = [];
     if ( $tt_variables && $bespoke ) {
-        my $repeatable =
-            $code && NoticeEditor::Checks->new( { module => $module, code => $code } )->repeatable_content;
+        my $repeatable = $code && NoticeEditor::Checks->new( { module => $module, code => $code } )->repeatable_content;
         push @{$field_selection}, tt_variable_fields( $tt_variables, $repeatable ? $repeatable->{loop} : undef );
         push @{$field_selection}, bespoke_fields($bespoke);
         %insert_syntaxes = (
@@ -158,7 +157,6 @@ sub for_notice {
     %insert_syntaxes = ( tt => 1, bespoke => 1 ) unless grep { $_ } values %insert_syntaxes;
 
     push @{$field_selection}, tt_plugin_fields();
-
 
     # Fields without an explicit syntax can be inserted with the syntaxes they have a value for
     for my $field (@$field_selection) {
@@ -253,7 +251,7 @@ sub patron_attribute_fields {
 
     # Koha::Patron->extended_attribute_values is added by Koha bug 30657
     my $has_attribute_values = Koha::Patron->can('extended_attribute_values');
-    my $attribute_types = Koha::Patron::Attribute::Types->search( {}, { order_by => 'code' } );
+    my $attribute_types      = Koha::Patron::Attribute::Types->search( {}, { order_by => 'code' } );
     while ( my $at = $attribute_types->next ) {
 
         # Codes that are not valid TT identifiers are looked up with the hash 'item' method
@@ -263,8 +261,9 @@ sub patron_attribute_fields {
             text  => "attribute:" . $at->code,
             tt    => !$has_attribute_values
             ? sprintf( q{[%% borrower.get_extended_attribute('%s').attribute %%]}, $at->code =~ s/'/\\'/gr )
-            : $at->repeatable ? "[% FOREACH value IN borrower.extended_attribute_values.$tt_code %][% value %] [% END %]"
-            :                   "[% borrower.extended_attribute_values.$tt_code %]",
+            : $at->repeatable
+            ? "[% FOREACH value IN borrower.extended_attribute_values.$tt_code %][% value %] [% END %]"
+            : "[% borrower.extended_attribute_values.$tt_code %]",
         };
     }
     return @fields;
@@ -391,47 +390,25 @@ sub bespoke_fields {
     return @fields;
 }
 
-# Template Toolkit plugins that are useful in notices, with examples of their
-# methods and filter options. 'use' names the plugin the example needs loaded;
-# KohaDates is always loaded for notices (see C4::Letters::_process_tt).
+# Template Toolkit plugins that are useful in notices, in alphabetical order,
+# with examples of their methods and filter options. 'use' names the plugin the
+# example needs loaded; KohaDates and Remove_MARC_punctuation are always loaded
+# for notices (see C4::Letters::_process_tt).
 sub tt_plugin_fields {
+
+    # Values that come from the staff member generating the notice are only
+    # available on slips: notices sent by cron jobs have none
+    my $staff = '(staff slips only)';
+
     my @plugins = (
         {
-            name     => 'KohaDates',
-            loaded   => 1,
+            name     => 'AdditionalContents',
             examples => [
-                [ 'date'                         => q{[% checkout.date_due | $KohaDates %]} ],
-                [ 'date with time'               => q{[% checkout.date_due | $KohaDates with_hours => 1 %]} ],
-                [ 'due date (time if not 23:59)' => q{[% checkout.date_due | $KohaDates as_due_date => 1 %]} ],
-                [ 'date in ISO format'           => q{[% checkout.date_due | $KohaDates dateformat => 'iso' %]} ],
-                [ 'date plus 7 days'             => q{[% checkout.date_due | $KohaDates add_days => 7 %]} ],
-                [ 'today'                        => q{[% today | $KohaDates %]} ],
-            ],
-        },
-        {
-            name     => 'Price',
-            examples => [
-                [ 'amount'             => q{[% borrower.account.balance | $Price %]} ],
-                [ 'amount with symbol' => q{[% borrower.account.balance | $Price with_symbol => 1 %]} ],
-            ],
-        },
-        {
-            name     => 'Branches',
-            examples => [
-                [ 'library name' => q{[% Branches.GetName( borrower.branchcode ) %]} ],
-                [ 'library URL'  => q{[% Branches.GetURL( borrower.branchcode ) %]} ],
-            ],
-        },
-        {
-            name     => 'ItemTypes',
-            examples => [
-                [ 'item type description' => q{[% ItemTypes.GetDescription( item.effective_itemtype ) %]} ],
-            ],
-        },
-        {
-            name     => 'Categories',
-            examples => [
-                [ 'patron category name' => q{[% Categories.GetName( borrower.categorycode ) %]} ],
+                [
+                    'news for slips' =>
+                        "[% SET news = AdditionalContents.get( category => 'news', location => 'slip', library => branch.branchcode ) %]\n"
+                        . "[% FOREACH entry IN news.content %][% entry.title %]: [% entry.content %]\n[% END %]"
+                ],
             ],
         },
         {
@@ -446,15 +423,104 @@ sub tt_plugin_fields {
             ],
         },
         {
+            name     => 'Branches',
+            examples => [
+                [ 'library name'                  => q{[% Branches.GetName( borrower.branchcode ) %]} ],
+                [ 'library URL'                   => q{[% Branches.GetURL( borrower.branchcode ) %]} ],
+                [ "logged in library name $staff" => q{[% Branches.GetLoggedInBranchname %]} ],
+                [ "logged in library code $staff" => q{[% Branches.GetLoggedInBranchcode %]} ],
+            ],
+        },
+        {
+            name     => 'Categories',
+            examples => [
+                [ 'patron category name' => q{[% Categories.GetName( borrower.categorycode ) %]} ],
+            ],
+        },
+        {
+            name     => 'CirculationRules',
+            examples => [
+                [
+                    'renewals remaining' =>
+                        q{[% SET renewals = CirculationRules.Renewals( borrower.borrowernumber, item.itemnumber ) %]}
+                        . q{[% renewals.remaining %] of [% renewals.allowed %] renewals remaining}
+                ],
+                [
+                    'renewals used' =>
+                        q{[% SET renewals = CirculationRules.Renewals( borrower.borrowernumber, item.itemnumber ) %]}
+                        . q{[% renewals.count %] renewals used}
+                ],
+                [
+                    'effective rule' =>
+                        q{[% CirculationRules.Get( item.homebranch, borrower.categorycode, item.effective_itemtype, 'issuelength' ) %]}
+                ],
+                [
+                    'rule set for these values' =>
+                        q{[% CirculationRules.Search( item.homebranch, borrower.categorycode, item.effective_itemtype, 'renewalsallowed' ) %]}
+                ],
+            ],
+        },
+        {
+            name     => 'Desks',
+            examples => [
+                [ "logged in desk name $staff" => q{[% Desks.GetLoggedInDeskName %]} ],
+                [ "logged in desk id $staff"   => q{[% Desks.GetLoggedInDeskId %]} ],
+            ],
+        },
+        {
+            name     => 'ItemTypes',
+            examples => [
+                [ 'item type description' => q{[% ItemTypes.GetDescription( item.effective_itemtype ) %]} ],
+            ],
+        },
+        {
             name     => 'Koha',
             examples => [
                 [ 'system preference' => q{[% Koha.Preference( 'LibraryName' ) %]} ],
+                [
+                    'system preference with several values' =>
+                        q{[% FOREACH value IN Koha.MultivaluePreference( 'PatronSelfRegistrationBorrowerMandatoryField' ) %][% value %] [% END %]}
+                ],
+            ],
+        },
+        {
+            name     => 'KohaDates',
+            loaded   => 1,
+            examples => [
+                [ 'date'                         => q{[% checkout.date_due | $KohaDates %]} ],
+                [ 'date with time'               => q{[% checkout.date_due | $KohaDates with_hours => 1 %]} ],
+                [ 'due date (time if not 23:59)' => q{[% checkout.date_due | $KohaDates as_due_date => 1 %]} ],
+                [ 'date in ISO format'           => q{[% checkout.date_due | $KohaDates dateformat => 'iso' %]} ],
+                [ 'date plus 7 days'             => q{[% checkout.date_due | $KohaDates add_days => 7 %]} ],
+                [ 'today'                        => q{[% today | $KohaDates %]} ],
+                [ 'time zone'                    => q{[% KohaDates.tz %]} ],
+            ],
+        },
+        {
+            name     => 'Price',
+            examples => [
+                [ 'amount'             => q{[% borrower.account.balance | $Price %]} ],
+                [ 'amount with symbol' => q{[% borrower.account.balance | $Price with_symbol => 1 %]} ],
+            ],
+        },
+        {
+            name     => 'Registers',
+            examples => [
+                [ "logged in cash register name $staff" => q{[% Registers.session_register_name %]} ],
+                [ "logged in cash register id $staff"   => q{[% Registers.session_register_id %]} ],
+            ],
+        },
+        {
+            name     => 'Remove_MARC_punctuation',
+            loaded   => 1,
+            examples => [
+                [ 'remove trailing punctuation' => q{[% item.itemcallnumber | $Remove_MARC_punctuation %]} ],
             ],
         },
     );
 
     my @fields;
-    for my $plugin (@plugins) {
+    for my $plugin ( sort { lc $a->{name} cmp lc $b->{name} } @plugins ) {
         my $name = $plugin->{name};
         push @fields, { value => q{}, text => "---PLUGIN: $name---", syntax => 'tt' };
         push @fields, { value => q{}, text => "USE $name",           tt => "[% USE $name %]" } unless $plugin->{loaded};

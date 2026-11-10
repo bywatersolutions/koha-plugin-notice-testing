@@ -19,9 +19,8 @@ use Modern::Perl;
 
 use base qw( Koha::Plugins::Base );
 
-use JSON qw( decode_json );
+use JSON                      qw( decode_json );
 use Module::Load::Conditional qw( can_load );
-use Module::Metadata;
 
 use Koha::AuthUtils;
 
@@ -36,15 +35,10 @@ our $metadata = {
     minimum_version => $MINIMUM_VERSION,
     maximum_version => undef,
     version         => $VERSION,
-    description     => 'Adds a Template Toolkit field picker to the notice editor, and checks notices for problems before saving them. '
+    description     =>
+        'Adds a Template Toolkit field picker to the notice editor, and checks notices for problems before saving them. '
         . 'Backports Koha bugs 36588, 39716 and 43395.',
 };
-
-BEGIN {
-    my $path = Module::Metadata->find_module_by_name(__PACKAGE__);
-    $path =~ s!\.pm$!/lib!;
-    unshift @INC, $path;
-}
 
 =head1 NAME
 
@@ -107,7 +101,11 @@ Adds the JavaScript of the plugin to the notice editor
 sub intranet_js {
     my ( $self, $args ) = @_;
     return q{} unless $self->_on_notice_editor($args);
-    return sprintf q{<script src="%s/js/notice-editor.js?v=%s"></script>}, $self->_static_url, $VERSION;
+
+    # DOMPurify sanitizes the previews of notices, as for the notices of patrons
+    return
+        sprintf q{<script src="/intranet-tmpl/lib/dompurify/purify.min.js"></script>}
+        . q{<script src="%s/js/notice-editor.js?v=%s"></script>}, $self->_static_url, $VERSION;
 }
 
 =head2 api_routes

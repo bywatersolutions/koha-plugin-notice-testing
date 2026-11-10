@@ -2,22 +2,23 @@
 
 ## Relationship with Koha
 
-The plugin backports Koha bugs 36588, 39716 and 43395. Its code is kept as
+The plugin backports Koha bugs 36588, 39716, 43395, 38105 and 29490. Its code is kept as
 close as possible to the code of those bugs, so that changes made to one can be
 copied to the other until the bugs are in a Koha release:
 
 | Plugin | Koha |
 | --- | --- |
-| `lib/NoticeEditor/Variables.pm` | `Koha/Notice/Template/Variables.pm` |
-| `lib/NoticeEditor/Validator.pm` | `Koha/Notice/Template/Validator.pm` |
-| `lib/NoticeEditor/TableConfig.pm` | `C4::Letters::tt_table_config` |
-| `lib/NoticeEditor/Checks.pm` | `Koha::Notice::Template::repeatable_content`, `validate` |
-| `lib/NoticeEditor/Fields.pm` | the field list of `tools/letter.pl` |
-| `Controller.pm` | `Koha/REST/V1/NoticeTemplates.pm` |
+| `Variables.pm` | `Koha/Notice/Template/Variables.pm` |
+| `Validator.pm` | `Koha/Notice/Template/Validator.pm` |
+| `Preview.pm` | `Koha/Notice/Template/Preview.pm` |
+| `TableConfig.pm` | `C4::Letters::tt_table_config` |
+| `Checks.pm` | `Koha::Notice::Template::repeatable_content`, `validate` |
+| `Fields.pm` | the field list of `tools/letter.pl` |
+| `Controller.pm` | `Koha/REST/V1/NoticeTemplates.pm`; `preview` is `svc/letters/preview` |
 | `js/notice-editor.js` | `koha-tmpl/intranet-tmpl/prog/js/letter.js` |
 | `css/notice-editor.css` | the styles of `koha-tmpl/intranet-tmpl/prog/en/modules/tools/letter.tt` |
 
-`NoticeEditor::Variables` lists the data each notice receives. When Koha adds or
+`Variables.pm` lists the data each notice receives. When Koha adds or
 changes a notice, update it: `t/db_dependent/NoticeEditor/SampleNotices.t`
 fails when a sample notice of the Koha version tested is not listed.
 
@@ -37,7 +38,7 @@ ktd --name ne2605 --shell --run "cd /kohadevbox/koha && perl misc/devel/install_
 Then run the tests:
 
 ```bash
-ktd --name ne2605 --shell --run "cd /kohadevbox/plugins/koha-plugin-notice-testing && export PERL5LIB=\$PERL5LIB:Koha/Plugin/Com/ByWaterSolutions/NoticeEditor/lib:. && prove -r t/"
+ktd --name ne2605 --shell --run "cd /kohadevbox/plugins/koha-plugin-notice-testing && export PERL5LIB=\$PERL5LIB:. && prove -r t/"
 ```
 
 Format the code with Koha's `misc/devel/tidy.pl` before committing.

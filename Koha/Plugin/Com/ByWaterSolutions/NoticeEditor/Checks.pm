@@ -1,4 +1,4 @@
-package NoticeEditor::Checks;
+package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks;
 
 # This file is part of the Koha notice editor plugin, and of Koha.
 #
@@ -22,15 +22,15 @@ use Try::Tiny qw( catch try );
 
 use C4::Context;
 use Koha::CirculationRules;
-use NoticeEditor::Validator;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator;
 
 =head1 NAME
 
-NoticeEditor::Checks - Check notice templates for problems
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks - Check notice templates for problems
 
 =head1 SYNOPSIS
 
-    my $problems = NoticeEditor::Checks->new(
+    my $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
         {
             module  => 'circulation',
             code    => 'ODUE',
@@ -50,7 +50,7 @@ The methods are copies of those of Koha::Notice::Template (Koha bugs 39716 and
 
 =head3 new
 
-    my $checks = NoticeEditor::Checks->new(
+    my $checks = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
         { module => $module, code => $code, message_transport_type => $mtt, title => $title, content => $content } );
 
 =cut
@@ -192,6 +192,14 @@ message.
 
 A '[%' has no matching '%]'. Template Toolkit prints it as plain text.
 
+=item lowercase_directive
+
+A Template Toolkit directive (I<directive>, e.g. ELSE) is not written in
+capitals (as I<used>, e.g. 'else'). Template Toolkit only knows directives in
+capitals: it is an error when the template cannot be parsed, else a warning, as
+the word is then read as a variable (e.g. the content after [% else %] is always
+shown).
+
 =item tt_error
 
 Processing the template without data fails. I<error> holds the Template
@@ -208,7 +216,7 @@ are not checked, as they often only give the number of records.
 
 The I<field> uses a variable, field, plugin or block that will not be
 available when the notice is generated. See
-L<NoticeEditor::Validator/check_variables>.
+L<Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator/check_variables>.
 
 =back
 
@@ -236,8 +244,14 @@ sub validate {
             };
         }
 
-        my $parser = Template::Parser->new;
-        next if defined $parser->parse($text);
+        my $parser   = Template::Parser->new;
+        my $compiles = defined $parser->parse($text);
+
+        push @problems, map {
+            { %$_, severity => $compiles ? 'warning' : 'error', field => $field }
+        } _lowercase_directives($text);
+
+        next if $compiles;
 
         my $error = $parser->error;
         my @lines = $error =~ s/^line (\d+): // ? ($1) : ();
@@ -271,11 +285,18 @@ sub validate {
 
     # Only look for unavailable variables in templates that compile
     unless ( grep { $_->{type} eq 'tt_syntax' } @problems ) {
-        my $validator = NoticeEditor::Validator->new( { module => $self->module, code => $self->code } );
+        my $validator = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
+            { module => $self->module, code => $self->code } );
         for my $field (qw( title content )) {
+
+            # A lowercase directive read as a variable is already reported
+            my %directives = map { $_->{used} => 1 }
+                grep { $_->{type} eq 'lowercase_directive' && $_->{field} eq $field } @problems;
             push @problems, map {
                 { %$_, field => $field }
-            } @{ $validator->check_variables( $self->$field ) };
+                }
+                grep { !( $_->{type} eq 'unknown_variable' && $directives{ $_->{variable} } ) }
+                @{ $validator->check_variables( $self->$field ) };
         }
     }
 
@@ -288,6 +309,75 @@ sub validate {
     }
 
     return \@problems;
+}
+
+=head3 _lowercase_directives
+
+    my @problems = _lowercase_directives($text);
+
+Returns a lowercase_directive problem (see L</validate>), without severity nor
+field, for each Template Toolkit directive not written in capitals in the tags
+of I<$text>: at the start of a statement, or after an expression for those that
+can be (e.g. [% name if name %]). Words used as variables by the template (e.g.
+[% SET last = 1 %]) are not reported, nor ones followed by a field, arguments
+or an assignment (e.g. loop.last, item.in).
+
+=cut
+
+my @TT_DIRECTIVES = qw(
+    BLOCK CALL CASE CATCH CLEAR DEBUG DEFAULT ELSE ELSIF END FILTER FINAL FOR FOREACH GET IF INCLUDE INSERT LAST
+    MACRO META NEXT PERL PROCESS RAWPERL RETURN SET STOP SWITCH TAGS THROW TRY UNLESS USE VIEW WHILE WRAPPER
+);
+
+# Directives that can follow an expression, e.g. [% name IF name %]
+my %TT_TRAILING = map { $_ => 1 } qw( IF UNLESS FOR FOREACH WHILE FILTER );
+
+sub _lowercase_directives {
+    my ($text) = @_;
+
+    my %directives = map { lc($_) => $_ } @TT_DIRECTIVES, 'IN';
+
+    # Blank out the strings and comments of the tags, keeping their positions
+    my @tags;
+    while ( $text =~ m{\[%(.*?)%\]}gs ) {
+        my ( $tag, $offset ) = ( $1, $-[1] );
+        next if $tag =~ m{^[-+~=]?#};                                                   # Comment tag
+        $tag         =~ s{"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'}{ ' ' x length $& }gse;
+        $tag         =~ s{#[^\n]*}{ ' ' x length $& }ge;
+        $tag         =~ s{^[-+~=]|[-+~=]$}{ }g;
+        push @tags, { tag => $tag, offset => $offset };
+    }
+
+    # Variables the template defines, which can have the name of a directive
+    my %variables;
+    for my $tag ( map { $_->{tag} } @tags ) {
+        $variables{$1} = 1 while $tag =~ m{(?<![\w.\$])(\w+)\s*=(?!=)}g;
+        $variables{$1} = 1 while $tag =~ m{\b(?:FOREACH|FOR|MACRO)\s+(\w+)}g;
+    }
+
+    my ( @problems, %found );
+    for my $tag (@tags) {
+        while ( $tag->{tag} =~ m{(?<![\w.\$])([A-Za-z]+)\b(?!\s*(?:[.(]|=(?!=)))}g ) {
+            my ( $word, $position ) = ( $1, $-[1] );
+            my $directive = $directives{ lc $word };
+            next if !$directive || $word eq $directive || $variables{$word};
+
+            my $before = substr( $tag->{tag}, 0, $position );
+            if ( $directive eq 'IN' ) {
+                next unless $before =~ m{\b(?:FOREACH|FOR)\s+\w+\s+$}i;
+            } else {
+                next unless $before =~ m{(?:^|;)\s*$} || $TT_TRAILING{$directive};
+            }
+
+            my $line = 1 + ( () = substr( $text, 0, $tag->{offset} + $position ) =~ /\n/g );
+            unless ( $found{$word} ) {
+                $found{$word} = { type => 'lowercase_directive', directive => $directive, used => $word, lines => [] };
+                push @problems, $found{$word};
+            }
+            push @{ $found{$word}->{lines} }, $line unless grep { $_ == $line } @{ $found{$word}->{lines} };
+        }
+    }
+    return @problems;
 }
 
 =head3 _processing_error

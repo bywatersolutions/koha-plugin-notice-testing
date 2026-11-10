@@ -18,7 +18,7 @@
 use Modern::Perl;
 
 use Test::NoWarnings;
-use Test::More tests => 5;
+use Test::More tests => 6;
 use Test::Mojo;
 
 use t::lib::TestBuilder;
@@ -26,6 +26,7 @@ use t::lib::Mocks;
 
 use Koha::CirculationRules;
 use Koha::Database;
+use Mojo::JSON;
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor;
 
 my $schema  = Koha::Database->new->schema;
@@ -166,6 +167,40 @@ subtest 'fields() tests' => sub {
         ->status_is(200)
         ->json_is( '/insert_syntaxes' => [ 'bespoke', 'mixed' ] )
         ->json_has( '/only_bespoke/0' );
+
+    $schema->storage->txn_rollback;
+};
+
+subtest 'preview() tests' => sub {
+    plan tests => 11;
+
+    $schema->storage->txn_begin;
+
+    my $patron = $builder->build_object( { class => 'Koha::Patrons' } );
+    my $body   = {
+        module                 => 'members',
+        code                   => 'MEMBERSHIP_EXPIRY',
+        message_transport_type => 'email',
+        title                  => 'Expiry',
+        content                => '<h1>Hello [% borrower.firstname %]</h1> [% branch.branchcode %]',
+        is_html                => Mojo::JSON->true,
+        patron                 => $patron->cardnumber,
+    };
+
+    $t->post_ok( "$base/preview" => json => $body )->status_is(401);
+
+    my $userid = librarian('edit_notices');
+    $t->post_ok( "//$userid:$password\@$base/preview" => json => $body )
+        ->status_is(200)
+        ->json_is( '/patron/cardnumber' => $patron->cardnumber )
+        ->json_like( '/html' => qr{<h1>Hello \Q@{[ $patron->firstname ]}\E</h1> \Q@{[ $patron->branchcode ]}\E} )
+        ->json_is( '/messages' => [] );
+
+    $t->post_ok(
+        "//$userid:$password\@$base/preview" => json => { %$body, patron => 'NOT_A_CARDNUMBER', is_html => Mojo::JSON->false } )
+        ->status_is(200)
+        ->json_is( '/messages/0/code' => 'no_patron' )
+        ->json_like( '/html' => qr{^<div style="white-space: pre-wrap;">} );
 
     $schema->storage->txn_rollback;
 };

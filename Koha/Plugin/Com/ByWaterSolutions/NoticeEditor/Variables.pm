@@ -1,4 +1,4 @@
-package NoticeEditor::Variables;
+package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
 
 # This file is part of the Koha notice editor plugin, and of Koha.
 #
@@ -17,9 +17,14 @@ package NoticeEditor::Variables;
 
 use Modern::Perl;
 
+use Try::Tiny;
+
+use C4::Context;
+use Koha::Database;
+
 =head1 NAME
 
-NoticeEditor::Variables - The data each notice receives
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables - The data each notice receives
 
 =head1 DESCRIPTION
 
@@ -39,14 +44,37 @@ Each variable has a I<kind>:
 
 =item array_of_objects - an arrayref of Koha::Object of I<class>
 
-=item scalar, hash, array_of_hashes, unknown - values whose content is not checked
+=item hash - a hashref, whose I<keys> (key => type) are given when known, or
+whose keys are the columns of the database I<tables> (e.g. a row fetched with
+SELECT biblio.*, items.*); both can be given
+
+=item array_of_hashes - an arrayref of hashrefs, whose I<keys> or I<tables> are
+given as for hash
+
+=item scalar, unknown - values whose content is not checked
 
 =back
+
+Hashes with neither I<keys> nor I<tables> can have any keys (e.g. the columns
+of a report).
 
 It is a copy of Koha::Notice::Template::Variables (Koha bug 36588), for Koha
 versions without it. Keep them in sync.
 
 =cut
+
+# An item of the stock rotation report (Koha::StockRotationItem->investigate)
+my $STOCKROTATION_ITEM = {
+    kind => 'array_of_hashes',
+    keys => {
+        ( map { $_ => { kind => 'scalar' } } qw( author barcode callnumber itemnumber location onloan reason title ) ),
+        branch => { kind => 'hash',   tables => ['branches'] },
+        object => { kind => 'object', class  => 'Koha::StockRotationItem' },
+    },
+};
+
+# The checkouts fetched by misc/cronjobs/advance_notices.pl
+my @ADVANCE_NOTICE_TABLES = qw( biblio items issues );
 
 # module => { code => { variable => type } }. The code '*' applies to every
 # code of the module: it lists the variables of notices whose code is chosen by
@@ -474,17 +502,17 @@ our $VARIABLES = {
             debit    => { kind => 'object', class => 'Koha::Account::Line' },
         },
         'DUE' => {
-            biblio     => { kind => 'object', class => 'Koha::Biblio' },
-            biblioitem => { kind => 'object', class => 'Koha::Biblioitem' },
-            borrower   => { kind => 'object', class => 'Koha::Patron' },
-            branch     => { kind => 'object', class => 'Koha::Library' },
-            checkout   => { kind => 'hash' },
-            item       => { kind => 'object', class => 'Koha::Item' },
+            biblio     => { kind => 'object', class  => 'Koha::Biblio' },
+            biblioitem => { kind => 'object', class  => 'Koha::Biblioitem' },
+            borrower   => { kind => 'object', class  => 'Koha::Patron' },
+            branch     => { kind => 'object', class  => 'Koha::Library' },
+            checkout   => { kind => 'hash',   tables => \@ADVANCE_NOTICE_TABLES },
+            item       => { kind => 'object', class  => 'Koha::Item' },
         },
         'DUEDGST' => {
-            borrower  => { kind => 'object', class => 'Koha::Patron' },
-            branch    => { kind => 'object', class => 'Koha::Library' },
-            checkouts => { kind => 'array_of_hashes' },
+            borrower  => { kind => 'object',          class  => 'Koha::Patron' },
+            branch    => { kind => 'object',          class  => 'Koha::Library' },
+            checkouts => { kind => 'array_of_hashes', tables => \@ADVANCE_NOTICE_TABLES },
             count     => { kind => 'scalar' },
             items     => { kind => 'objects', class => 'Koha::Items' },
         },
@@ -531,17 +559,17 @@ our $VARIABLES = {
             recall   => { kind => 'object', class => 'Koha::Recall' },
         },
         'PREDUE' => {
-            biblio     => { kind => 'object', class => 'Koha::Biblio' },
-            biblioitem => { kind => 'object', class => 'Koha::Biblioitem' },
-            borrower   => { kind => 'object', class => 'Koha::Patron' },
-            branch     => { kind => 'object', class => 'Koha::Library' },
-            checkout   => { kind => 'hash' },
-            item       => { kind => 'object', class => 'Koha::Item' },
+            biblio     => { kind => 'object', class  => 'Koha::Biblio' },
+            biblioitem => { kind => 'object', class  => 'Koha::Biblioitem' },
+            borrower   => { kind => 'object', class  => 'Koha::Patron' },
+            branch     => { kind => 'object', class  => 'Koha::Library' },
+            checkout   => { kind => 'hash',   tables => \@ADVANCE_NOTICE_TABLES },
+            item       => { kind => 'object', class  => 'Koha::Item' },
         },
         'PREDUEDGST' => {
-            borrower  => { kind => 'object', class => 'Koha::Patron' },
-            branch    => { kind => 'object', class => 'Koha::Library' },
-            checkouts => { kind => 'array_of_hashes' },
+            borrower  => { kind => 'object',          class  => 'Koha::Patron' },
+            branch    => { kind => 'object',          class  => 'Koha::Library' },
+            checkouts => { kind => 'array_of_hashes', tables => \@ADVANCE_NOTICE_TABLES },
             count     => { kind => 'scalar' },
             items     => { kind => 'objects', class => 'Koha::Items' },
         },
@@ -567,7 +595,14 @@ our $VARIABLES = {
             item     => { kind => 'object', class => 'Koha::Item' },
         },
         'SR_SLIP' => {
-            branch => { kind => 'hash' },
+            branch => {
+                kind => 'hash',
+                keys => {
+                    ( map { $_ => { kind => 'scalar' } } qw( code email name phone ) ),
+                    items => $STOCKROTATION_ITEM,
+                    log   => $STOCKROTATION_ITEM,
+                },
+            },
         },
         'TRANSFERSLIP' => {
             biblio => { kind => 'object', class => 'Koha::Biblio' },
@@ -1128,16 +1163,17 @@ our $BESPOKE = {
 
 =head3 for_notice
 
-    my $variables = NoticeEditor::Variables->for_notice( $module, $code, { strict => 1 } );
+    my $variables = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->for_notice( $module, $code, { strict => 1 } );
 
 Returns a hashref of the variables the notice receives (name => type), or undef
 if they are not known.
 
-By default, the variables any sender of the notice may pass are included, so
-that checking a template never reports a variable that is available. With
-I<strict>, only the variables the notice surely receives are, for offering
-them in the editor: those of its code when it is listed, else those of the
-codes chosen by the library (code '*').
+A listed code receives the variables of its entry. For a code that is not
+listed (one chosen by the library, e.g. in the overdue notice triggers), the
+variables any sender of the module may pass are included by default, so that
+checking a template never reports a variable that is available. With
+I<strict>, only the variables of the codes chosen by the library (code '*') are,
+for offering them in the editor.
 
 =cut
 
@@ -1158,7 +1194,7 @@ sub for_notice {
 
 =head3 bespoke_for_notice
 
-    my $bespoke = NoticeEditor::Variables->bespoke_for_notice( $module, $code, { strict => 1 } );
+    my $bespoke = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->bespoke_for_notice( $module, $code, { strict => 1 } );
 
 Returns what the bespoke <<table.column>> syntax can use in the notice, or undef
 if it is not known: a hashref with the I<tables> whose columns can be used, the
@@ -1202,12 +1238,13 @@ sub bespoke_for_notice {
 
 =head3 _merge_for_notice
 
-Merges, with I<$merge>, the entries of I<$list> for the code '*' of the module
-and for the code of the notice. A code that is not listed may be sent by any of
-the module's senders (e.g. a code chosen in the overdue notice triggers), so
-the entries of all the codes of the module are merged then. With I<strict>
-(see L</for_notice>), only the entry of the code is used if it is listed, else
-the entry for '*'. Returns undef if the notice is not known.
+Merges, with I<$merge>, the entries of I<$list> for the notice. A code that is
+listed only receives what its own entry lists: its senders are known. A code
+that is not listed is one chosen by the library (e.g. in the overdue notice
+triggers), which may be sent by any of the module's senders, so the entries of
+all the codes of the module are merged then; with I<strict> (see
+L</for_notice>), only the entry for '*' is. Returns undef if the notice is not
+known.
 
 =cut
 
@@ -1219,7 +1256,7 @@ sub _merge_for_notice {
     my $strict = $params && $params->{strict};
 
     my @entries =
-          $codes->{$code} ? ( $strict ? $codes->{$code} : grep { defined } ( $codes->{'*'}, $codes->{$code} ) )
+          $codes->{$code} ? $codes->{$code}
         : $codes->{'*'}   ? ( $strict ? $codes->{'*'} : values %$codes )
         :                   return;
 
@@ -1237,6 +1274,122 @@ Whether two variable types are the same kind of value, of the same class.
 sub _same_type {
     my ( $a, $b ) = @_;
     return $a->{kind} eq $b->{kind} && ( $a->{class} // q{} ) eq ( $b->{class} // q{} );
+}
+
+=head3 keys_of
+
+    my $keys = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->keys_of($type);
+
+Returns the keys (key => type) of a hash, or of the hashes of an
+array_of_hashes, of type I<$type>: its I<keys>, and the columns of its
+I<tables> as scalars. Returns undef if they are not known.
+
+=cut
+
+my $SOURCES;    # Table name => DBIx::Class result source
+
+sub keys_of {
+    my ( $class, $type ) = @_;
+
+    return unless $type && ( $type->{kind} eq 'hash' || $type->{kind} eq 'array_of_hashes' );
+    return unless $type->{keys} || $type->{tables};
+
+    my %keys;
+    if ( $type->{tables} ) {
+        unless ($SOURCES) {
+            my $schema = Koha::Database->new->schema;
+            $SOURCES = { map { my $source = $schema->source($_); ( $source->name => $source ) } $schema->sources };
+        }
+        for my $table ( @{ $type->{tables} } ) {
+            my $source = $SOURCES->{$table} or next;
+            $keys{$_} = { kind => 'scalar' } for $source->columns;
+        }
+    }
+    return { %keys, %{ $type->{keys} || {} } };
+}
+
+=head3 plugin_content_namespaces
+
+    my $namespaces = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_namespaces;
+
+Returns the namespaces (namespace => plugin name) of the enabled plugins that
+add content to notices with the notices_content hook: GetPreparedLetter passes
+it to every notice as plugin_content.I<namespace>.
+
+=cut
+
+sub plugin_content_namespaces {
+    my ($class) = @_;
+    return { map { $_->{namespace} => $_->{name} } $class->_content_plugins };
+}
+
+=head3 plugin_content_type
+
+    my $type = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_type( $module, $code );
+
+Returns the type of plugin_content in the notice: a hash whose keys are the
+namespaces of the enabled plugins adding content to it.
+
+Plugins describe the content they add with the notices_content_variables hook:
+
+    sub notices_content_variables {
+        my ( $self, $params ) = @_;    # { module => ..., letter_code => ... }
+        return unless $params->{letter_code} =~ /^HOLD/;
+        return {
+            ill_request => { kind => 'object', class => 'Koha::ILL::Request' },
+            title       => { kind => 'scalar' },
+        };
+    }
+
+It returns the variables of the content added to the notice (name => type, as
+in the lists of this module), or nothing when the plugin adds no content to
+it. The content of plugins without the hook (or whose hook fails) is not
+known: anything can be used under their namespace.
+
+=cut
+
+sub plugin_content_type {
+    my ( $class, $module, $code ) = @_;
+
+    my %content;
+    for my $plugin ( $class->_content_plugins ) {
+        my $object = $plugin->{plugin};
+        unless ( $object->can('notices_content_variables') ) {
+            $content{ $plugin->{namespace} } = { kind => 'unknown' };
+            next;
+        }
+        my ( $variables, $failed );
+        try {
+            $variables = $object->notices_content_variables( { module => $module, letter_code => $code } );
+        } catch {
+            $failed = 1;
+        };
+        if ($failed) {
+            $content{ $plugin->{namespace} } = { kind => 'unknown' };
+        } elsif ( ref $variables eq 'HASH' && %$variables ) {
+            $content{ $plugin->{namespace} } = { kind => 'hash', keys => $variables };
+        }
+    }
+    return { kind => 'hash', keys => \%content };
+}
+
+# The enabled plugins adding content to notices (notices_content hook), each
+# as { plugin => ..., namespace => ..., name => ... }
+sub _content_plugins {
+    return unless C4::Context->config('enable_plugins');
+
+    require Koha::Plugins;
+    my @plugins;
+    for my $plugin ( grep { $_->can('notices_content') } Koha::Plugins->get_enabled_plugins ) {
+        my $metadata = try { $plugin->get_metadata } or next;
+        next unless $metadata->{namespace};
+        push @plugins, {
+            plugin    => $plugin,
+            namespace => $metadata->{namespace},
+            name      => $metadata->{name} // $metadata->{namespace},
+        };
+    }
+    return @plugins;
 }
 
 =head3 globals

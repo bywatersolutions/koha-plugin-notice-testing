@@ -97,7 +97,7 @@
                                                 "properties": {
                                                     "type": {
                                                         "type": "string",
-                                                        "description": "The kind of problem:\n\n* `tt_syntax`: the Template Toolkit markup cannot be parsed\n* `unclosed_tag`: a `[%` has no matching `%]`\n* `tt_error`: processing the template without data fails\n* `missing_repeatable_content`: the notice receives a list of records,\n  but the template has nothing to list them with\n* `unknown_variable`: a variable the notice does not receive\n* `unknown_method`: a field or method that does not exist on an object\n* `missing_plugin`: a plugin used without being loaded\n* `unknown_block`: a block processed but not defined\n"
+                                                        "description": "The kind of problem:\n\n* `tt_syntax`: the Template Toolkit markup cannot be parsed\n* `unclosed_tag`: a `[%` has no matching `%]`\n* `lowercase_directive`: a Template Toolkit directive not written in capitals\n* `tt_error`: processing the template without data fails\n* `missing_repeatable_content`: the notice receives a list of records,\n  but the template has nothing to list them with\n* `unknown_variable`: a variable the notice does not receive\n* `unknown_method`: a field or method that does not exist on an object\n* `unknown_key`: a key that a hash whose keys are known does not have\n* `missing_plugin`: a plugin used without being loaded\n* `unknown_block`: a block processed but not defined\n"
                                                     },
                                                     "severity": {
                                                         "type": "string",
@@ -125,6 +125,14 @@
                                                     "error": {
                                                         "type": "string",
                                                         "description": "The Template Toolkit error message"
+                                                    },
+                                                    "directive": {
+                                                        "type": "string",
+                                                        "description": "The Template Toolkit directive, in capitals"
+                                                    },
+                                                    "used": {
+                                                        "type": "string",
+                                                        "description": "The directive as written in the template"
                                                     },
                                                     "loop": {
                                                         "type": "string",
@@ -165,6 +173,13 @@
                                                             "type": "string"
                                                         },
                                                         "description": "The variables the notice receives"
+                                                    },
+                                                    "keys": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "The keys of the hash"
                                                     },
                                                     "plugin": {
                                                         "type": "string",
@@ -392,6 +407,256 @@
                             "fields",
                             "insert_syntaxes",
                             "only_bespoke"
+                        ],
+                        "additionalProperties": false
+                    }
+                },
+                "400": {
+                    "description": "Bad request",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "401": {
+                    "description": "Authentication required",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "403": {
+                    "description": "Access forbidden",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "500": {
+                    "description": "Internal server error. Possible `error_code` attribute values:\n\n* `internal_server_error`\n",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                },
+                "503": {
+                    "description": "Under maintenance",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "error": {
+                                "type": "string",
+                                "description": "An explanation for the error"
+                            },
+                            "error_code": {
+                                "type": "string",
+                                "description": "Code describing the error"
+                            }
+                        },
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "x-koha-authorization": {
+                "permissions": {
+                    "tools": "edit_notices"
+                }
+            }
+        }
+    },
+    "/preview": {
+        "post": {
+            "x-mojo-to": "Com::ByWaterSolutions::NoticeEditor::Controller#preview",
+            "operationId": "noticeEditorPreview",
+            "tags": [
+                "notice_editor"
+            ],
+            "summary": "Preview a notice template with the records of a patron",
+            "parameters": [
+                {
+                    "name": "body",
+                    "in": "body",
+                    "required": true,
+                    "description": "The template and the records to preview it with",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "module": {
+                                "type": "string",
+                                "description": "Module of the notice"
+                            },
+                            "code": {
+                                "type": "string",
+                                "description": "Code of the notice"
+                            },
+                            "message_transport_type": {
+                                "type": "string",
+                                "description": "Transport type of the template"
+                            },
+                            "lang": {
+                                "type": "string",
+                                "description": "Language of the template"
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": "Subject of the template"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Body of the template"
+                            },
+                            "is_html": {
+                                "type": "boolean",
+                                "description": "Whether the template is HTML"
+                            },
+                            "style": {
+                                "type": "string",
+                                "description": "CSS of the notice, for print templates"
+                            },
+                            "patron": {
+                                "type": "string",
+                                "description": "Card number of the patron to preview the notice for"
+                            },
+                            "barcode": {
+                                "type": "string",
+                                "description": "Barcode of the item to preview the notice with"
+                            }
+                        },
+                        "required": [
+                            "module"
+                        ],
+                        "additionalProperties": false
+                    }
+                }
+            ],
+            "consumes": [
+                "application/json"
+            ],
+            "produces": [
+                "application/json"
+            ],
+            "responses": {
+                "200": {
+                    "description": "The notice, rendered",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Subject of the notice"
+                            },
+                            "html": {
+                                "type": "string",
+                                "description": "The notice as shown to patrons, as an HTML document"
+                            },
+                            "messages": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string",
+                                            "enum": [
+                                                "no_patron",
+                                                "no_item"
+                                            ]
+                                        },
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "code"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "notes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "variable": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "code"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "patron": {
+                                "type": [
+                                    "object",
+                                    "null"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "cardnumber": {
+                                        "type": [
+                                            "string",
+                                            "null"
+                                        ]
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "required": [
+                            "title",
+                            "html",
+                            "messages",
+                            "notes",
+                            "patron"
                         ],
                         "additionalProperties": false
                     }

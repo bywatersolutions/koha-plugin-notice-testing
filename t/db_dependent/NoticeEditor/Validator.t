@@ -18,19 +18,21 @@
 use Modern::Perl;
 
 use Test::NoWarnings;
-use Test::More tests => 8;
+use Test::More tests => 12;
 
+use Test::MockModule;
 use YAML::XS;
 
 use C4::Context;
 use Koha::Database;
 use Koha::Schema::Result::Borrower;
 
-use_ok('NoticeEditor::Validator');
+use_ok('Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator');
 
 sub problems {
     my ( $module, $code, $content ) = @_;
-    my $validator = NoticeEditor::Validator->new( { module => $module, code => $code } );
+    my $validator =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new( { module => $module, code => $code } );
     return [ map { join ' ', $_->{type}, $_->{variable} // $_->{block}, $_->{suggestion} ? "-> $_->{suggestion}" : () }
             @{ $validator->check_variables($content) } ];
 }
@@ -100,11 +102,103 @@ SKIP: {
     );
 };
 
+subtest 'Keys of hashes' => sub {
+    plan tests => 4;
+
+    is_deeply(
+        problems(
+            'circulation', 'SR_SLIP',
+            '[% branch.name %][% branch.nom %][% FOREACH item IN branch.items %][% item.title %][% item.heading %]'
+                . '[% item.branch.branchname %][% item.object.indemand %][% item.object.nope %][% END %]'
+                . '[% branch.items.size %][% branch.keys.size %][% branch.items.first.barcode %]'
+        ),
+        [ 'unknown_key branch.nom', 'unknown_key item.heading', 'unknown_method item.object.nope' ],
+        'Keys of hashes and of the hashes of lists are checked, and objects they hold'
+    );
+    is_deeply(
+        problems( 'circulation', 'DUE', '[% checkout.title %][% checkout.date_due %][% checkout.nope %]' ),
+        ['unknown_key checkout.nope'], 'Keys of hashes holding database rows are the columns of their tables'
+    );
+    is_deeply(
+        problems( 'report', 'X', '[% FOREACH row IN data %][% row.anything %][% END %]' ),
+        [], 'Hashes whose keys are not known are not checked'
+    );
+    my $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
+        { module => 'circulation', code => 'SR_SLIP' } )->check_variables('[% branch.nom %]');
+    is( $problems->[0]->{severity}, 'warning', 'A key that does not exist prints nothing: it is a warning' );
+};
+
+subtest 'Content added by plugins' => sub {
+    plan tests => 2;
+
+    my $variables = Test::MockModule->new('Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables');
+    $variables->mock(
+        plugin_content_type => sub {
+            return {
+                kind => 'hash',
+                keys => {
+                    rapido => { kind => 'hash', keys => { title => { kind => 'scalar' } } },
+                    other  => { kind => 'unknown' },
+                },
+            };
+        }
+    );
+    is_deeply(
+        problems(
+            'circulation', 'CHECKOUT',
+            '[% plugin_content.rapido.title %][% plugin_content.rapido.heading %][% plugin_content.other.anything %]'
+        ),
+        ['unknown_key plugin_content.rapido.heading'],
+        'The variables plugins describe are checked, and the content of the others is not'
+    );
+    is_deeply(
+        problems( 'circulation', 'CHECKOUT', '[% plugin_content.nothing.message %]' ),
+        ['unknown_key plugin_content.nothing'], 'Content no enabled plugin adds to the notice is reported'
+    );
+};
+
+subtest 'Variables of other notices of the module' => sub {
+    plan tests => 1;
+
+    is_deeply(
+        problems( 'circulation', 'SR_SLIP', '[% FOREACH o IN overdues %][% o.date_due %][% END %][% branch.name %]' ),
+        ['unknown_variable overdues'],
+        'A listed notice does not receive the variables of notices chosen by the library (e.g. overdues)'
+    );
+};
+
+subtest 'FOREACH without a loop variable' => sub {
+    plan tests => 3;
+
+    is_deeply(
+        problems( 'circulation', 'ODUE', '[% FOREACH overdues %][% date_due %][% END %]' ),
+        ['unknown_variable date_due'],
+        'Fields of objects are not made variables by a loop without a variable, and its import is not reported'
+    );
+    is_deeply(
+        problems(
+            'patron_slip', 'MYSLIP',
+            '[% SET rows = [ { a => 1 } ] %][% FOREACH rows %][% a %][% FOREACH [1] %][% END %][% b %][% END %][% c %]'
+        ),
+        ['unknown_variable c'],
+        'Variables are not checked in a loop without a variable on a list that is not of objects, which may define any'
+    );
+    is_deeply(
+        problems(
+            'circulation', 'ODUE',
+            '[% FOREACH overdues %][% END %][% FOREACH x IN [1, 2] %][% x.anything %][% END %]'
+        ),
+        [],
+        'A loop without a variable does not give the type of its list to the variable of the next loop'
+    );
+};
+
 subtest 'Severity and lines' => sub {
     plan tests => 1;
 
-    my $validator = NoticeEditor::Validator->new( { module => 'patron_slip', code => 'MYSLIP' } );
-    my $problems  = $validator->check_variables(
+    my $validator = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
+        { module => 'patron_slip', code => 'MYSLIP' } );
+    my $problems = $validator->check_variables(
               "[% IF ( patron ) %]\n[% patron.firstname %]\n[% END %]\n[% total | \$Price %] [% borrower.firstnme %]\n"
             . "[% Branches.GetName( borrower.branchcode ) %][% PROCESS nope %]" );
     is_deeply(
@@ -146,7 +240,8 @@ subtest 'Blocks' => sub {
 subtest 'Notices whose variables are not known' => sub {
     plan tests => 5;
 
-    my $validator = NoticeEditor::Validator->new( { module => 'not_a_module', code => 'X' } );
+    my $validator =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new( { module => 'not_a_module', code => 'X' } );
     ok( !$validator->knows_variables, 'Unknown module' );
     is_deeply( $validator->check_variables('[% anything.goes %]'), [], 'Variables are not reported' );
     is_deeply(
@@ -180,7 +275,8 @@ subtest 'Sample notices' => sub {
     for my $table ( @{ $data->{tables} } ) {
         for my $notice ( @{ $table->{letter}->{rows} || [] } ) {
             my $validator =
-                NoticeEditor::Validator->new( { module => $notice->{module}, code => $notice->{code} } );
+                Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
+                { module => $notice->{module}, code => $notice->{code} } );
             my $content = join "\n", @{ $notice->{content} };
             for my $problem ( @{ $validator->check_variables($content) } ) {
                 my $name = $problem->{variable} // $problem->{block};

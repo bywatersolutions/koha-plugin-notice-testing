@@ -1,4 +1,4 @@
-package NoticeEditor::TableConfig;
+package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig;
 
 # This file is part of the Koha notice editor plugin, and of Koha.
 #
@@ -19,7 +19,7 @@ use Modern::Perl;
 
 =head1 NAME
 
-NoticeEditor::TableConfig - How the tables passed to notices are exposed to Template Toolkit
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig - How the tables passed to notices are exposed to Template Toolkit
 
 =head1 DESCRIPTION
 
@@ -30,7 +30,7 @@ without it. It mirrors the configuration of C4::Letters::_get_tt_params.
 
 =head2 tt_table_config
 
-  my $config = NoticeEditor::TableConfig::tt_table_config();
+  my $config = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig::tt_table_config();
 
 Return a hashref keyed by database table name describing how each table is
 exposed to Template Toolkit notices: the Koha::Objects class used to fetch

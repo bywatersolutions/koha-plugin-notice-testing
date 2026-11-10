@@ -1,4 +1,4 @@
-package NoticeEditor::Fields;
+package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Fields;
 
 # This file is part of the Koha notice editor plugin, and of Koha.
 #
@@ -23,13 +23,13 @@ use C4::Context;
 use Koha::Database;
 use Koha::Patron;
 use Koha::Patron::Attribute::Types;
-use NoticeEditor::Checks;
-use NoticeEditor::TableConfig;
-use NoticeEditor::Variables;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
 
 =head1 NAME
 
-NoticeEditor::Fields - The fields the notice editor offers to insert in a notice
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Fields - The fields the notice editor offers to insert in a notice
 
 =head1 DESCRIPTION
 
@@ -42,7 +42,7 @@ and 39716), for Koha versions without it. Keep them in sync.
 
 =head3 for_notice
 
-    my $fields = NoticeEditor::Fields->for_notice( $module, $code );
+    my $fields = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Fields->for_notice( $module, $code );
 
 Returns a hashref with:
 
@@ -77,12 +77,18 @@ sub for_notice {
     my $field_selection = [ repeatable_content_fields( $module, $code ) ];
 
     # The fields each syntax can use, from the data the notice receives
-    my $tt_variables = NoticeEditor::Variables->for_notice( $module, $code, { strict => 1 } );
-    my $bespoke      = NoticeEditor::Variables->bespoke_for_notice( $module, $code, { strict => 1 } );
+    my $tt_variables =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->for_notice( $module, $code, { strict => 1 } );
+    my $bespoke = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->bespoke_for_notice(
+        $module, $code,
+        { strict => 1 }
+    );
     my %insert_syntaxes;
     my $only_bespoke = [];
     if ( $tt_variables && $bespoke ) {
-        my $repeatable = $code && NoticeEditor::Checks->new( { module => $module, code => $code } )->repeatable_content;
+        my $repeatable = $code
+            && Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new( { module => $module, code => $code } )
+            ->repeatable_content;
         push @{$field_selection}, tt_variable_fields( $tt_variables, $repeatable ? $repeatable->{loop} : undef );
         push @{$field_selection}, bespoke_fields($bespoke);
         %insert_syntaxes = (
@@ -156,6 +162,7 @@ sub for_notice {
     }
     %insert_syntaxes = ( tt => 1, bespoke => 1 ) unless grep { $_ } values %insert_syntaxes;
 
+    push @{$field_selection}, plugin_content_fields( $module, $code );
     push @{$field_selection}, tt_plugin_fields();
 
     # Fields without an explicit syntax can be inserted with the syntaxes they have a value for
@@ -223,10 +230,11 @@ sub get_columns_for {
         debits    => 'accountlines',
         opac_news => 'additional_contents_localizations',
     );
-    my $sql          = sprintf "SHOW COLUMNS FROM %s", $columns_from{$table} // $table;    # TODO not db agnostic
+    my $sql = sprintf "SHOW COLUMNS FROM %s", $columns_from{$table} // $table;    # TODO not db agnostic
     my $table_prefix = $table . q|.|;
-    my $tt_object    = NoticeEditor::TableConfig::tt_table_config()->{$table}->{singular};
-    my $rows         = C4::Context->dbh->selectall_arrayref( $sql, { Slice => {} } );
+    my $tt_object =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig::tt_table_config()->{$table}->{singular};
+    my $rows = C4::Context->dbh->selectall_arrayref( $sql, { Slice => {} } );
     for my $row ( @{$rows} ) {
         next
             if $row->{'Field'} eq 'timestamp'
@@ -276,7 +284,9 @@ sub repeatable_content_fields {
 
     return unless $code;
 
-    my $repeatable = NoticeEditor::Checks->new( { module => $module, code => $code } )->repeatable_content;
+    my $repeatable =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new( { module => $module, code => $code } )
+        ->repeatable_content;
     return unless $repeatable;
 
     my @fields = ( { value => q{}, text => '---REPEATABLE CONTENT---' } );
@@ -317,35 +327,24 @@ sub repeatable_content_fields {
 sub tt_variable_fields {
     my ( $variables, $skip_loop ) = @_;
 
-    my %singular = map { $_->{plural} => $_->{singular} } values %{ NoticeEditor::TableConfig::tt_table_config() };
-    my $schema   = Koha::Database->new->schema;
-
     my ( @objects, @lists, @values );
     for my $name ( sort keys %$variables ) {
         my $type = $variables->{$name};
-        if (   $type->{kind} eq 'object'
-            && $type->{class}
-            && can_load( modules => { $type->{class} => undef } )
-            && $type->{class}->can('_type') )
-        {
-            my $source = eval { $schema->source( $type->{class}->_type ) } or next;
-            push @objects, { value => q{}, text => "---$name---", syntax => 'tt' };
-            push @objects, map { { value => q{}, text => "$name.$_", tt => "[% $name.$_ %]" } }
-                grep { $_ ne 'timestamp' && $_ ne 'password' } $source->columns;
-            if ( $type->{class} eq 'Koha::Patron' ) {
-                push @objects, map {
-                    { %$_, value => q{}, text => "$name.$_->{text}", tt => $_->{tt} =~ s/borrower\./$name./gr }
-                } patron_attribute_fields();
-            }
+        my $keys = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->keys_of($type);
+        if ( my @columns = object_fields( $name, $type ) ) {
+            push @objects, { value => q{}, text => "---$name---", syntax => 'tt' }, @columns;
+        } elsif ( $keys && $type->{kind} eq 'hash' ) {
+            push @objects, { value => q{}, text => "---$name---", syntax => 'tt' }, hash_fields( $name, $keys );
         } elsif ( $type->{kind} =~ /^(?:objects|array_of_objects|array_of_hashes)$/ ) {
-            next if defined $skip_loop && $name eq $skip_loop;
-            my $element = $singular{$name} // ( $name =~ s/s$//r );
-            $element = 'element' if $element eq $name;
-            push @lists, {
-                value => q{},
-                text  => "FOREACH $element IN $name",
-                tt    => "[% FOREACH $element IN $name %]\n\n[% END %]",
-            };
+            my $skip = defined $skip_loop && $name eq $skip_loop;
+            push @lists, loop_field($name) unless $skip;
+
+            # The fields of the hashes of the list, in its loop
+            if ($keys) {
+                my $element = loop_element($name);
+                push @objects, { value => q{}, text => "---$element IN $name---", syntax => 'tt' },
+                    hash_fields( $element, $keys );
+            }
         } else {
             push @values, { value => q{}, text => $name, tt => "[% $name %]" };
         }
@@ -356,6 +355,73 @@ sub tt_variable_fields {
         ( @lists  ? ( { value => q{}, text => '---LISTS---',  syntax => 'tt' }, @lists )  : () ),
         ( @values ? ( { value => q{}, text => '---VALUES---', syntax => 'tt' }, @values ) : () ),
     );
+}
+
+# The name of the loop variable for the elements of the list $name
+sub loop_element {
+    my ($name)   = @_;
+    my ($last)   = $name =~ /(\w+)$/;
+    my %singular = map { $_->{plural} => $_->{singular} }
+        values %{ Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig::tt_table_config() };
+    my $element = $singular{$last} // ( $last =~ s/s$//r );
+    return $element eq $last ? 'element' : $element;
+}
+
+# A loop on the list $name
+sub loop_field {
+    my ($name) = @_;
+    my $element = loop_element($name);
+    return {
+        value => q{},
+        text  => "FOREACH $element IN $name",
+        tt    => "[% FOREACH $element IN $name %]\n\n[% END %]",
+    };
+}
+
+# The columns of the object $name of type $type, if it is an object
+sub object_fields {
+    my ( $name, $type ) = @_;
+
+    return
+           unless $type->{kind} eq 'object'
+        && $type->{class}
+        && can_load( modules => { $type->{class} => undef } )
+        && $type->{class}->can('_type');
+    my $source = eval { Koha::Database->new->schema->source( $type->{class}->_type ) } or return;
+
+    my @fields = map { { value => q{}, text => "$name.$_", tt => "[% $name.$_ %]" } }
+        grep { $_ ne 'timestamp' && $_ ne 'password' } $source->columns;
+    if ( $type->{class} eq 'Koha::Patron' ) {
+        push @fields, map {
+            { %$_, value => q{}, text => "$name.$_->{text}", tt => $_->{tt} =~ s/borrower\./$name./gr }
+        } patron_attribute_fields();
+    }
+    return @fields;
+}
+
+# The keys of the hash $name: its values, then the fields of the objects,
+# hashes and lists it holds
+sub hash_fields {
+    my ( $name, $keys ) = @_;
+
+    my ( @values, @nested );
+    for my $key ( sort keys %$keys ) {
+        next if $key eq 'timestamp' || $key eq 'password';
+        my $type     = $keys->{$key};
+        my $path     = "$name.$key";
+        my $sub_keys = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->keys_of($type);
+        if ( my @columns = object_fields( $path, $type ) ) {
+            push @nested, @columns;
+        } elsif ( $sub_keys && $type->{kind} eq 'hash' ) {
+            push @nested, hash_fields( $path, $sub_keys );
+        } elsif ( $type->{kind} =~ /^(?:objects|array_of_objects|array_of_hashes)$/ ) {
+            push @nested, loop_field($path);
+            push @nested, hash_fields( loop_element($path), $sub_keys ) if $sub_keys;
+        } else {
+            push @values, { value => q{}, text => $path, tt => "[% $path %]" };
+        }
+    }
+    return ( @values, @nested );
 }
 
 # Fields for the bespoke <<table.column>> syntax: the columns of the tables the
@@ -386,6 +452,26 @@ sub bespoke_fields {
     if ( @{ $bespoke->{tokens} } ) {
         push @fields, { value => q{}, text => '---VALUES---', syntax => 'bespoke' };
         push @fields, map { { value => $_, text => $_, syntax => 'bespoke' } } @{ $bespoke->{tokens} };
+    }
+    return @fields;
+}
+
+# Fields for the content Koha plugins add to the notice with the
+# notices_content hook, as plugin_content.<namespace>: the variables of the
+# content when the plugin describes them (notices_content_variables hook)
+sub plugin_content_fields {
+    my ( $module, $code ) = @_;
+
+    my $names = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_namespaces;
+    my $content =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_type( $module, $code )->{keys};
+
+    my @fields;
+    for my $namespace ( sort keys %$content ) {
+        my $path = "plugin_content.$namespace";
+        my $keys = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->keys_of( $content->{$namespace} );
+        push @fields, { value => q{}, text => "---$path ($names->{$namespace})---", syntax => 'tt' },
+            $keys ? hash_fields( $path, $keys ) : { value => q{}, text => $path, tt => "[% $path %]" };
     }
     return @fields;
 }

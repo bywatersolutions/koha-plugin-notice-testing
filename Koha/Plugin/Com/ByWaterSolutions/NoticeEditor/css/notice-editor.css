@@ -1,3 +1,11 @@
+/* Filter above the list of fields, as wide as it */
+.field_filter {
+    box-sizing: border-box;
+    display: block;
+    margin-bottom: 0.3rem;
+    width: 100%;
+}
+
 /* Koha notice editor plugin: copy of the styles added to tools/letter.tt by
  * Koha bugs 36588, 39716 and 43395. Keep them in sync. */
 
@@ -67,4 +75,13 @@ fieldset.rows .template_problems li,
     background-color: #fff3cd;
     color: #664d03;
     font-weight: bold;
+}
+
+/* Previews (Koha bugs 38105 and 29490) */
+#preview_template .notice-preview-source {
+    white-space: pre-wrap;
+}
+#preview_template .preview-notes ul {
+    margin: 0.25em 0 0 0;
+    padding-left: 1.5em;
 }

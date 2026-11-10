@@ -28,7 +28,7 @@ use C4::Context;
 use Koha::CirculationRules;
 use Koha::Database;
 
-use_ok('NoticeEditor::Checks');
+use_ok('Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks');
 
 my $schema  = Koha::Database->new->schema;
 my $builder = t::lib::TestBuilder->new;
@@ -48,7 +48,8 @@ subtest 'repeatable_content() tests' => sub {
 
     my $repeatable = sub {
         my ( $module, $code ) = @_;
-        return NoticeEditor::Checks->new( { module => $module, code => $code } )->repeatable_content;
+        return Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new( { module => $module, code => $code } )
+            ->repeatable_content;
     };
 
     is_deeply(
@@ -90,13 +91,13 @@ subtest 'repeatable_content() tests' => sub {
 };
 
 subtest 'validate() tests' => sub {
-    plan tests => 13;
+    plan tests => 17;
 
     $schema->storage->txn_begin;
 
     my $validate = sub {
         my ( $code, $title, $content ) = @_;
-        return NoticeEditor::Checks->new(
+        return Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
             { module => 'circulation', code => $code, title => $title, content => $content } )->validate;
     };
 
@@ -126,7 +127,50 @@ subtest 'validate() tests' => sub {
         'Unterminated tag is a warning, with its line'
     );
 
-    $problems = NoticeEditor::Checks->new(
+    $problems = $validate->( 'CHECKOUT', 'Checkouts', "[% IF borrower.firstname %]Dear\n[% else %]Hello[% END %]" );
+    is_deeply(
+        $problems,
+        [
+            {
+                type      => 'lowercase_directive', severity => 'warning', field => 'content', lines => [2],
+                directive => 'ELSE', used => 'else'
+            }
+        ],
+        'Lowercase directive that is read as a variable is a warning, with its line'
+    );
+
+    $problems = $validate->( 'CHECKOUT', 'Checkouts', "[% if borrower.firstname %]Dear[% End %]" );
+    is_deeply(
+        [ map { "$_->{type} $_->{severity} " . ( $_->{used} // q{} ) } @$problems ],
+        [ 'lowercase_directive error if', 'lowercase_directive error End', 'tt_syntax error ' ],
+        'Lowercase directives are errors when the template cannot be parsed, as well as the syntax error'
+    );
+
+    $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
+        {
+            module  => 'not_a_module', code => 'X', title => 'Hi',
+            content => "[% FOREACH c in list %]\n[% c.title if c.title %][% END %]\n[% IF x %]a[% else %]b[% END %]"
+        }
+    )->validate;
+    is_deeply(
+        [ map { "$_->{directive} @{ $_->{lines} }" } grep { $_->{type} eq 'lowercase_directive' } @$problems ],
+        [ 'IN 1', 'IF 2', 'ELSE 3' ],
+        'Lowercase IN of FOREACH and directives after an expression are reported'
+    );
+
+    is_deeply(
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
+            {
+                module  => 'not_a_module', code => 'X', title => 'Hi',
+                content => "[%# if this is set %][% SET last = 1 %][% last %][% loop.last %][% \"if\" %]"
+                    . "[% x IF y and not z or a mod 2 %][% INCLUDE b next = 1 %][% BLOCK b %][% END %]"
+            }
+        )->validate,
+        [],
+        'Variables, fields, strings, comments and lowercase operators are not reported'
+    );
+
+    $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
         { module => 'not_a_module', code => 'X', title => 'Hi', content => "[% x | \$NotAFilter %]" } )->validate;
     is_deeply(
         $problems,
@@ -158,7 +202,7 @@ subtest 'validate() tests' => sub {
         'Going through the list with next is accepted'
     );
     is_deeply(
-        NoticeEditor::Checks->new(
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
             {
                 module  => 'circulation', code => 'ODUE', message_transport_type => 'sms', title => 'Overdue',
                 content => 'You have [% overdues.count %] overdue items'

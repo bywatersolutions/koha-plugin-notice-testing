@@ -30,8 +30,7 @@ find(
             my $m = $_;
             return unless $m =~ s/[.]pm$//;
 
-            # The modules of the plugin library, in its lib directory
-            if ( $m =~ s{^.*/lib/}{} || $m =~ s{^.*?/?(?=Koha/)}{} ) {
+            if ( $m =~ s{^.*?/?(?=Koha/)}{} ) {
                 $m =~ s{/}{::}g;
                 push @modules, $m;
             }
@@ -42,6 +41,6 @@ find(
 
 plan tests => scalar(@modules) + 1;
 
-# The plugin puts its library on @INC
 use_ok('Koha::Plugin::Com::ByWaterSolutions::NoticeEditor') || BAIL_OUT('Cannot load the plugin');
-use_ok($_) || BAIL_OUT("Cannot load $_") for grep { $_ ne 'Koha::Plugin::Com::ByWaterSolutions::NoticeEditor' } @modules;
+use_ok($_) || BAIL_OUT("Cannot load $_")
+    for grep { $_ ne 'Koha::Plugin::Com::ByWaterSolutions::NoticeEditor' } @modules;

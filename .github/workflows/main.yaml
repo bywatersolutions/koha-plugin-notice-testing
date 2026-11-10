@@ -75,14 +75,14 @@ jobs:
     - name: Install plugins in KTD
       run: |
         export KTD_HOME=$(pwd)/../koha-testing-docker
-        ktd --name  noticeeditortest --shell --run "export PERL5LIB=\$PERL5LIB:/kohadevbox/plugins/${{ env.GITHUB_REPO }}/Koha/Plugin/Com/ByWaterSolutions/NoticeEditor/lib && cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
+        ktd --name  noticeeditortest --shell --run "cd /kohadevbox/koha && perl misc/devel/install_plugins.pl"
 
     - name: Run plugin tests
       run: |
         export KTD_HOME=$(pwd)/../koha-testing-docker
         ktd --name noticeeditortest --shell --run "
           cd /kohadevbox/plugins/${{ env.GITHUB_REPO }} &&
-          export PERL5LIB=\$PERL5LIB:Koha/Plugin/Com/ByWaterSolutions/NoticeEditor/lib:. &&
+          export PERL5LIB=\$PERL5LIB:. &&
           cpanm --notest TAP::Harness::JUnit &&
           JUNIT_OUTPUT_FILE=junit.xml prove -v -r -s t/ --harness=TAP::Harness::JUnit
         "

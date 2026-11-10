@@ -1,4 +1,4 @@
-package NoticeEditor::Validator;
+package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator;
 
 # This file is part of the Koha notice editor plugin, and of Koha.
 #
@@ -20,17 +20,21 @@ use Modern::Perl;
 use Module::Load::Conditional qw( can_load );
 use Template::Parser;
 
-use NoticeEditor::TableConfig;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig;
 use Koha::Database;
-use NoticeEditor::Variables;
+use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
+
+# Template Toolkit virtual methods of hashes, used when the hash has no such key
+my %HASH_VMETHODS =
+    map { $_ => 1 } qw( defined delete each exists import item items keys list nsort pairs size sort values );
 
 =head1 NAME
 
-NoticeEditor::Validator - Check the Template Toolkit markup of notice templates
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator - Check the Template Toolkit markup of notice templates
 
 =head1 SYNOPSIS
 
-    my $validator = NoticeEditor::Validator->new(
+    my $validator = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
         { module => 'patron_slip', code => 'MYSLIP' } );
     my $problems = $validator->check_variables($content);
 
@@ -56,7 +60,7 @@ follow (method results, hashes, plain values) are trusted.
 
 =head3 new
 
-    my $validator = NoticeEditor::Validator->new( { module => $module, code => $code } );
+    my $validator = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new( { module => $module, code => $code } );
 
 =cut
 
@@ -66,7 +70,8 @@ sub new {
         module => $params->{module} // q{},
         code   => $params->{code}   // q{},
     };
-    $self->{variables} = NoticeEditor::Variables->for_notice( $self->{module}, $self->{code} );
+    $self->{variables} =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->for_notice( $self->{module}, $self->{code} );
     return bless $self, $class;
 }
 
@@ -109,6 +114,11 @@ I<plugin> is a Template Toolkit plugin the template uses without loading it
 with [% USE I<plugin> %]. It is an error when the plugin is used as a filter
 (e.g. | $Price), as Template Toolkit then fails.
 
+=item unknown_key
+
+I<variable> (the path up to the problem, e.g. 'branch.nmae') is not one of the
+I<keys> of a hash whose keys are known. Template Toolkit prints nothing for it.
+
 =item unknown_block
 
 The template processes the block I<block>, which it does not define.
@@ -133,7 +143,13 @@ sub check_variables {
     # Types of the variables the template can use
     my %types = (
         %{ $self->{variables} || {} },
-        map { $_ => { kind => 'unknown' } } NoticeEditor::Variables->globals,
+        map { $_ => { kind => 'unknown' } } Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->globals,
+    );
+
+    # The content added by plugins, under the namespace of each
+    $types{plugin_content} = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_type(
+        $self->{module},
+        $self->{code}
     );
 
     # Variables defined by the template itself: SET, USE, MACRO, FOREACH
@@ -144,12 +160,27 @@ sub check_variables {
         $types{$name} = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
     }
 
-    # FOREACH: each list lookup is followed by the assignment of its loop variable
-    while ( $code =~ m{my \$_tt_list = (.*?);\n.*?\$stash->\{'((?:[^'\\]|\\.)*)'\} = \$_tt_value;}gs ) {
-        my ( $list, $name ) = ( $1, $2 );
-        my ($chain) = $list =~ m{^\$stash->get\((.*)\)$}s;
-        my $type = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
-        $types{$name} = _element_type($type);
+    # FOREACH: each list lookup is followed by the assignment of its loop
+    # variable, before the list of any loop nested in it. A loop without a
+    # variable (FOREACH list) instead makes the keys of each element that is a
+    # hash variables: as they can be anything, variables are not checked in it,
+    # unless its elements are objects, whose fields are not made variables.
+    my @lists;
+    while ( $code =~ m{my \$_tt_list = (.*?);\n}gs ) {
+        push @lists, { list => $1, start => $-[0], end => $+[0] };
+    }
+    my @imported;    # [ start, end ] of the code of loops without a variable
+    for my $i ( 0 .. $#lists ) {
+        my $until   = $i < $#lists ? $lists[ $i + 1 ]->{start} : length $code;
+        my $body    = substr( $code, $lists[$i]->{end}, $until - $lists[$i]->{end} );
+        my ($chain) = $lists[$i]->{list} =~ m{^\$stash->get\((.*)\)$}s;
+        my $type    = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
+        if ( $body =~ m{\$stash->\{'((?:[^'\\]|\\.)*)'\} = \$_tt_value;} ) {
+            $types{$1} = _element_type($type);
+        } elsif ( $body =~ m{\$stash->get\(\['import',} && _element_type($type)->{kind} ne 'object' ) {
+            my $scope = _localised( $code, $lists[$i]->{end} );
+            push @imported, $scope if $scope;
+        }
     }
 
     my @problems;
@@ -166,6 +197,9 @@ sub check_variables {
 
     for my $lookup ( _variable_lookups($code) ) {
         my $problem = $self->_resolve( \%types, $lookup->{chain} )->{problem} or next;
+        next
+            if $problem->{type} eq 'unknown_variable'
+            && grep { $lookup->{at} > $_->[0] && $lookup->{at} < $_->[1] } @imported;
 
         # Template Toolkit fails on fields that objects do not have, and on
         # filters it cannot find. Other missing variables just print nothing.
@@ -269,6 +303,21 @@ sub _resolve {
         } elsif ( $type->{kind} eq 'array_of_objects' ) {
             $type =
                 $step =~ /^(?:\d+|first|last)$/ ? { kind => 'object', class => $type->{class} } : { kind => 'unknown' };
+        } elsif ( $type->{kind} eq 'hash' ) {
+            my $keys = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->keys_of($type)
+                or return { type => { kind => 'unknown' } };
+            if ( $keys->{$step} ) {
+                $type = $keys->{$step};
+            } elsif ( $HASH_VMETHODS{$step} ) {
+                return { type => { kind => 'unknown' } };
+            } else {
+                return {
+                    type    => { kind => 'unknown' },
+                    problem => { type => 'unknown_key', variable => "$path.$step", keys => [ sort keys %$keys ] },
+                };
+            }
+        } elsif ( $type->{kind} eq 'array_of_hashes' ) {
+            $type = $step =~ /^(?:\d+|first|last)$/ ? _element_type($type) : { kind => 'unknown' };
         } else {
             return { type => { kind => 'unknown' } };
         }
@@ -296,7 +345,7 @@ sub _suggestion {
             can_load( modules => { $config->{module} => undef } )
                 ? ( $config->{singular} => $config->{module}->object_class )
                 : ()
-        } values %{ NoticeEditor::TableConfig::tt_table_config() },
+        } values %{ Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig::tt_table_config() },
     );
     my $class = $usual_class{$name} or return;
 
@@ -384,6 +433,8 @@ sub _element_type {
     my ($type) = @_;
     return { kind => 'object', class => _object_class( $type->{class} ) } if $type->{kind} eq 'objects';
     return { kind => 'object', class => $type->{class} }                  if $type->{kind} eq 'array_of_objects';
+    return { kind => 'hash',   map { $type->{$_} ? ( $_ => $type->{$_} ) : () } qw( keys tables ) }
+        if $type->{kind} eq 'array_of_hashes';
     return { kind => 'unknown' };
 }
 
@@ -391,8 +442,10 @@ sub _element_type {
 
 All the variable lookups ($stash->get calls) in compiled template code,
 including the ones nested in method arguments. Each is a hashref with the
-I<chain> of names (see L</_parse_chain>), the I<line> of the template it is on,
-and I<filter> set if the variable is used as a filter (e.g. | $Price).
+I<chain> of names (see L</_parse_chain>), its position I<at> in I<$code>, the
+I<line> of the template it is on, and I<filter> set if the variable is used as a
+filter (e.g. | $Price). The import Template Toolkit does in loops without a
+variable is not a lookup of a variable, and is left out.
 
 =cut
 
@@ -404,14 +457,41 @@ sub _variable_lookups {
         my $args  = _balanced( $code, $start - 1 );
         next unless defined $args;
         my $at = $start - length('$stash->get(');
+
+        # Template Toolkit's import of the elements of a loop without a variable
+        next if $args =~ m{^\['import',\s*\[\$_tt_value\]\]$};
         push @lookups, {
             chain  => _parse_chain($args),
+            at     => $at,
             line   => _line_at( $code, $at ),
             filter => substr( $code, 0, $at ) =~ m{\$context->filter\($} ? 1 : 0,
         };
         pos($code) = $start;
     }
     return @lookups;
+}
+
+=head3 _localised
+
+The [ start, end ] of the compiled code run in the stash localised by the
+first $context->localise() after I<$position>, up to the matching
+$context->delocalise(); undef if there is none.
+
+=cut
+
+sub _localised {
+    my ( $code, $position ) = @_;
+    pos($code) = $position;
+    my ( $start, $depth );
+    while ( $code =~ m{\$context->(localise|delocalise)\(\)}g ) {
+        if ( $1 eq 'localise' ) {
+            $start //= $-[0];
+            $depth++;
+        } elsif ( defined $start && !--$depth ) {
+            return [ $start, $+[0] ];
+        }
+    }
+    return;
 }
 
 =head3 _source_lines

@@ -24,7 +24,7 @@ use Module::Load::Conditional qw( can_load );
 
 use Koha::AuthUtils;
 
-our $VERSION         = "0.1.2";
+our $VERSION         = "1.0.0";
 our $MINIMUM_VERSION = "26.05";
 
 our $metadata = {

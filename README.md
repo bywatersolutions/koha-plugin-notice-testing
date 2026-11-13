@@ -13,7 +13,11 @@ that are expected in Koha 27.05:
   an overdue notice that does not list the items) can be saved anyway.
 * [Bug 43395](https://bugs.koha-community.org/bugzilla3/show_bug.cgi?id=43395):
   the check also reports variables, fields and plugins the notice will not have.
-
+* [Bug 38105](https://bugs.koha-community.org/bugzilla3/show_bug/cgi?id=38105)
+  Parses the css and html properly. If HTML is not selected for the notice, it will print as it would print.
+* [Bug 44117](https://bugs.koha-community.org/bugzilla3/show_bug.cgi?id=44117):
+  Adds a plugin hook to allow for inserting notice variables to the field picker in notices
+  
 The plugin does nothing on Koha versions that include these bugs.
 
 ## Installation

@@ -706,6 +706,11 @@ our $VARIABLES = {
         'ACCOUNTS_SUMMARY' => {
             borrower => { kind => 'object', class => 'Koha::Patron' },
         },
+        'CONVERTED_TO_PRINT' => {
+            borrower         => { kind => 'object', class => 'Koha::Patron' },
+            branch           => { kind => 'object', class => 'Koha::Library' },
+            original_message => { kind => 'object', class => 'Koha::Notice::Message' },
+        },
         'DISCHARGE' => {
             borrower => { kind => 'object', class => 'Koha::Patron' },
             branch   => { kind => 'object', class => 'Koha::Library' },
@@ -1100,6 +1105,7 @@ our $BESPOKE = {
         '2FA_ENABLE'           => { tables => [qw( borrowers branches )],     tokens => [] },
         '2FA_OTP_TOKEN'        => { tables => [qw( borrowers )],              tokens => [qw( otp_token )] },
         'ACCOUNTS_SUMMARY'     => { tables => [qw( borrowers )],              tokens => [] },
+        'CONVERTED_TO_PRINT'   => { tables => [qw( borrowers branches )],     tokens => [] },
         'DISCHARGE'            => { tables => [qw( borrowers branches )],     tokens => [] },
         'MEMBERSHIP_EXPIRY'    => { tables => [qw( borrowers branches )],     tokens => [] },
         'MEMBERSHIP_RENEWED'   => { tables => [qw( borrowers branches )],     tokens => [] },

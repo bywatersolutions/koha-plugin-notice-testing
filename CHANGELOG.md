@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CONVERTED_TO_PRINT (Koha 26.11, the print notice of an email or SMS notice that could not be sent) is known: its fields are listed and its variables checked, borrower, branch and original_message
+
 ## [1.1.0] - 2026-11-13
 
 ### Changed

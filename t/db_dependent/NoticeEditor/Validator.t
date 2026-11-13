@@ -18,7 +18,7 @@
 use Modern::Perl;
 
 use Test::NoWarnings;
-use Test::More tests => 12;
+use Test::More tests => 13;
 
 use Test::MockModule;
 use YAML::XS;
@@ -102,8 +102,40 @@ SKIP: {
     );
 };
 
+subtest 'Variables assigned values of several types' => sub {
+    plan tests => 5;
+
+    is_deeply(
+        problems( 'circulation', 'ODUE', '[% WHILE (item = overdues.next) %][% item.date_due %][% END %]' ),
+        [], 'A variable the notice passes, assigned a value of another type, is not checked (WHILE)'
+    );
+    is_deeply(
+        problems( 'circulation', 'ODUE', '[% SET item = overdues.next %][% item.date_due %]' ),
+        [], '... nor with SET'
+    );
+    is_deeply(
+        problems(
+            'reserves', 'HOLD', '[% SET x = item %][% x.barcode %][% SET x = borrower %][% x.surname %][% x.nope %]'
+        ),
+        [],
+        'A variable assigned values of different types is not checked'
+    );
+    is_deeply(
+        problems(
+            'reserves', 'HOLD',
+            '[% FOREACH x IN [ item ] %][% x.barcode %][% END %][% FOREACH x IN [ borrower ] %][% x.surname %][% END %]'
+        ),
+        [],
+        '... nor a loop variable reused for lists of different types'
+    );
+    is_deeply(
+        problems( 'reserves', 'HOLD', '[% SET x = item %][% SET x = hold.item %][% x.barcod %]' ),
+        ['unknown_method x.barcod'], 'A variable assigned values of the same type is checked'
+    );
+};
+
 subtest 'Keys of hashes' => sub {
-    plan tests => 4;
+    plan tests => 5;
 
     is_deeply(
         problems(
@@ -126,6 +158,14 @@ subtest 'Keys of hashes' => sub {
     my $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new(
         { module => 'circulation', code => 'SR_SLIP' } )->check_variables('[% branch.nom %]');
     is( $problems->[0]->{severity}, 'warning', 'A key that does not exist prints nothing: it is a warning' );
+    is_deeply(
+        problems(
+            'circulation', 'SR_SLIP',
+            '[% branch.empty %][% branch.hash %][% branch.first.name %][% branch.join %][% plugin_content.empty %]'
+        ),
+        [],
+        'Virtual methods of hashes, and of lists, which hashes also have, are not keys'
+    );
 };
 
 subtest 'Content added by plugins' => sub {
@@ -163,7 +203,7 @@ subtest 'Variables of other notices of the module' => sub {
     is_deeply(
         problems( 'circulation', 'SR_SLIP', '[% FOREACH o IN overdues %][% o.date_due %][% END %][% branch.name %]' ),
         ['unknown_variable overdues'],
-        'A listed notice does not receive the variables of notices chosen by the library (e.g. overdues)'
+        'A listed notice does not receive the variables of custom codes (e.g. overdues)'
     );
 };
 
@@ -221,7 +261,7 @@ subtest 'Severity and lines' => sub {
 };
 
 subtest 'Blocks' => sub {
-    plan tests => 3;
+    plan tests => 5;
 
     is_deeply(
         problems( 'patron_slip', 'MYSLIP', '[% BLOCK b %]x[% END %][% PROCESS b %][% PROCESS c %]' ),
@@ -234,6 +274,18 @@ subtest 'Blocks' => sub {
     is_deeply(
         problems( 'patron_slip', 'MYSLIP', '[% INCLUDE "patron-title.inc" patron = borrower %]' ),
         [], 'Including a file is accepted'
+    );
+    is_deeply(
+        problems( 'patron_slip', 'MYSLIP', '[% MACRO m(a, b) BLOCK %][% a.x %][% b %][% END %][% m(1, 2) %]' ),
+        [], 'Arguments of macros are variables'
+    );
+    is_deeply(
+        problems(
+            'patron_slip', 'MYSLIP',
+            '[% BLOCK b %][% c %][% d.surname %][% e %][% END %][% INCLUDE b c = 1 d = borrower %][% PROCESS b e = 2 %]'
+        ),
+        [],
+        '... and parameters of INCLUDE and PROCESS in the block'
     );
 };
 

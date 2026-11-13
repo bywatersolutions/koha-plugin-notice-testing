@@ -54,7 +54,11 @@
       var toggle = $('<span class="show_more"> <a href="#"></a></span>');
       toggle
         .find("a")
-        .text(__("and %s more").format(values.length - shown))
+        .text(
+          __nx("and {count} more", "and {count} more", values.length - shown, {
+            count: values.length - shown,
+          }),
+        )
         .on("click", function (e) {
           e.preventDefault();
           more.prop("hidden", false);
@@ -109,7 +113,7 @@
       var choices = $("<span></span>");
       markers.forEach(function (marker, index) {
         if (index > 0) {
-          choices.append(document.createTextNode(__(" or ")));
+          choices.append(document.createTextNode(" " + __("or") + " "));
         }
         choices.append($("<code></code>").text(marker));
       });
@@ -306,17 +310,22 @@
     textarea.wrap('<div class="content_with_gutter"></div>');
     gutter = $('<div class="line_gutter" aria-hidden="true"></div>');
     textarea.before(gutter);
-    textarea
-      .on("input.line_gutter", function () {
-        renderLineGutter(textarea, gutter);
-      })
-      .on("scroll.line_gutter", function () {
-        gutter.scrollTop(textarea.scrollTop());
-      });
+    // Measuring the lines is slow on long templates: wait for a pause in
+    // typing or resizing
+    var render = function () {
+      clearTimeout(gutter.data("timer"));
+      gutter.data(
+        "timer",
+        setTimeout(function () {
+          renderLineGutter(textarea, gutter);
+        }, 150),
+      );
+    };
+    textarea.on("input.line_gutter", render).on("scroll.line_gutter", function () {
+      gutter.scrollTop(textarea.scrollTop());
+    });
     if (window.ResizeObserver) {
-      new ResizeObserver(function () {
-        renderLineGutter(textarea, gutter);
-      }).observe(textarea[0]);
+      new ResizeObserver(render).observe(textarea[0]);
     }
     renderLineGutter(textarea, gutter);
     return gutter;
@@ -443,6 +452,36 @@
   }
 
   /*
+   * Show on the Save button that the notice is being saved (its templates are
+   * checked first), as other saves do with KOHA.AJAX.MarkRunning, or that it
+   * is not anymore. ajax.js is not loaded on this page in every version: its
+   * markup is used then.
+   */
+  var saving = false;
+  var saving_redirect;
+  function markSaving(running) {
+    var button = $("#submit_form");
+    saving = running;
+    if (running) {
+      saving_redirect = $("#redirect").val();
+      button.data("original-html", button.html());
+      if (window.KOHA && KOHA.AJAX) {
+        KOHA.AJAX.MarkRunning(button, __("Saving..."));
+      } else {
+        button
+          .prop("disabled", true)
+          .text(__("Saving..."))
+          .prepend('<span class="loading"></span>');
+      }
+    } else {
+      if (window.KOHA && KOHA.AJAX) {
+        KOHA.AJAX.MarkDone(button);
+      }
+      button.prop("disabled", false).html(button.data("original-html"));
+    }
+  }
+
+  /*
    * Before saving: list the problems of the templates in a modal. Saving is
    * only possible when there are warnings but no errors.
    */
@@ -532,9 +571,10 @@
       }),
       dataType: "json",
     }).then(function (response) {
-      fieldsets.find(".template_problems").empty();
       var with_problems = [];
+      var checked = {};
       response.templates.forEach(function (template) {
+        checked[template.message_transport_type + "_" + template.lang] = 1;
         showTemplateProblems(
           templateFieldset(template.message_transport_type, template.lang),
           template.problems,
@@ -545,6 +585,16 @@
             lang: template.lang,
             problems: template.problems,
           });
+        }
+      });
+      // Templates left empty are not checked: clear what was shown for them
+      fieldsets.each(function () {
+        var key =
+          $(this).find('input[name="message_transport_type"]').val() +
+          "_" +
+          $(this).find('input[name="lang"]').val();
+        if (!checked[key]) {
+          showTemplateProblems($(this), []);
         }
       });
       return with_problems;
@@ -660,6 +710,7 @@
     var option = $("<option></option>")
       .val(field.value || "")
       .text(field.text)
+      .attr("title", field.text)
       .attr("data-syntax", field.syntax);
     if (field.tt) {
       option.attr("data-tt", field.tt);
@@ -683,9 +734,12 @@
       mixed: __("Template Toolkit, bespoke where needed"),
       bespoke: __("Bespoke << >>"),
     };
-    var choice = $('<div class="insert_syntax"></div>').append(
-      $("<span></span>").text(__("Insert as:")),
-    );
+    var label_id = "insert_syntax_label_" + name;
+    var choice = $(
+      '<div class="insert_syntax" role="radiogroup"></div>',
+    )
+      .attr("aria-labelledby", label_id)
+      .append($("<span></span>").attr("id", label_id).text(__("Insert as:")));
     ["tt", "mixed", "bespoke"].forEach(function (syntax) {
       if (syntaxes.indexOf(syntax) === -1) {
         return;
@@ -773,6 +827,13 @@
       return;
     }
 
+    // The message body takes the width left by the list of fields (see the
+    // CSS), as in Koha with bug 36588
+    fieldsets
+      .find('textarea[name="content"]')
+      .closest("table")
+      .addClass("message_body_editor");
+
     // Template Toolkit errors of saved templates: remove the file and line of tools/letter.pl
     $(".template_toolkit_error").each(function () {
       $(this)
@@ -822,6 +883,7 @@
       module: module,
       code: $("#code").val(),
     }).then(function (response) {
+      showPreviewRecords(response.preview_records, response.preview_combines);
       fieldsets.each(function () {
         var fieldset = $(this);
         var select = fieldset.find('select[name="SQLfieldname"]');
@@ -893,7 +955,7 @@
       var title = fieldset.find('input[name="title"]').val();
       var content = fieldset.find('textarea[name="content"]').val();
       if (!title && !content) {
-        fieldset.find(".template_problems").empty();
+        showTemplateProblems(fieldset, []);
         return;
       }
       button.prop("disabled", true);
@@ -925,27 +987,48 @@
         });
     });
 
-    // Check the templates before the checks of core, and saving
+    // Check the templates before the checks of core, and saving. While they
+    // are checked, the Save button shows that the notice is being saved, and
+    // it is not saved twice
     var validator = form.data("validator");
     if (validator) {
       var core_submit = validator.settings.submitHandler;
+      var submit = function (form_element) {
+        if (core_submit.call(validator, form_element) === false) {
+          // Core did not save it (e.g. a missing subject)
+          markSaving(false);
+        }
+      };
       validator.settings.submitHandler = function (form_element) {
+        if (saving) {
+          return false;
+        }
+        markSaving(true);
         validateTemplates().then(
           function (with_problems) {
             if (!with_problems.length) {
-              return core_submit.call(validator, form_element);
+              return submit(form_element);
             }
+            markSaving(false);
             confirmTemplateProblems(with_problems, function () {
-              core_submit.call(validator, form_element);
+              markSaving(true);
+              submit(form_element);
             });
           },
           function () {
             // Do not block saving if the check itself failed
-            core_submit.call(validator, form_element);
+            submit(form_element);
           },
         );
         return false;
       };
+      // "Save and continue editing" while saving must not change where the
+      // notice being saved goes (core sets it before this runs)
+      $("#saveandcontinue").on("click", function () {
+        if (saving) {
+          $("#redirect").val(saving_redirect);
+        }
+      });
     }
 
     // Explain the problems of the saved templates when opening a notice
@@ -955,6 +1038,76 @@
   });
 
   // Previews (Koha bugs 38105 and 29490)
+
+  // The kinds of records notices can be previewed with: their name, and what
+  // to enter to find them
+  var PREVIEW_RECORDS = {
+    patron: [__("Patron"), __("Card number")],
+    item: [__("Item"), __("Barcode")],
+    basket: [__("Basket"), __("Basket number")],
+    order: [__("Order"), __("Order number")],
+    vendor: [__("Vendor"), __("Vendor ID or name")],
+    hold: [__("Hold"), __("Hold ID")],
+    suggestion: [__("Suggestion"), __("Suggestion number")],
+    illrequest: [__("ILL request"), __("Request ID")],
+    booking: [__("Booking"), __("Booking ID")],
+    article_request: [__("Article request"), __("Request ID")],
+    recall: [__("Recall"), __("Recall ID")],
+    ticket: [__("Catalog concern"), __("Concern ID")],
+    subscription: [__("Subscription"), __("Subscription number")],
+    oai_server: [__("OAI server"), __("Server ID or name")],
+  };
+
+  function recordName(kind) {
+    return PREVIEW_RECORDS[kind] ? PREVIEW_RECORDS[kind][0] : kind;
+  }
+
+  // The fields of the records the notice receives, all optional. Notices
+  // combining items take several items
+  function showPreviewRecords(kinds, combines) {
+    var li = $("#notice_editor_preview_records");
+    li.empty();
+    if (!kinds || !kinds.length) {
+      li.hide();
+      return;
+    }
+    li.append($('<span class="label"></span>').text(__("Preview with:")));
+    kinds.forEach(function (kind) {
+      var several = combines && kind === "item";
+      li.append(
+        $('<label class="inline"></label>')
+          .attr("for", "preview_record_" + kind)
+          .text(" " + (several ? __("Items") : recordName(kind)) + ": "),
+        $('<input type="text" class="preview_record" />').attr({
+          id: "preview_record_" + kind,
+          "data-kind": kind,
+          placeholder: several
+            ? __("Barcodes, separated by commas")
+            : PREVIEW_RECORDS[kind]
+              ? PREVIEW_RECORDS[kind][1]
+              : "",
+        }),
+      );
+    });
+    li.append(
+      $('<div class="hint"></div>').text(
+        __(
+          "Optional. The preview uses these records and the ones related to them (e.g. a patron's checkouts, a basket's orders), or examples when there are none.",
+        ),
+      ),
+    );
+    if (combines) {
+      li.append(
+        $('<div class="hint"></div>').text(
+          __(
+            "This notice is sent once per item, and the notices for several items are combined into one message while the first is not sent yet: preview them with several items, or with the patron's (up to 3). Lines of ---- separate the header and the footer of the notice from what is repeated for each item.",
+          ),
+        ),
+      );
+    }
+    li.show();
+  }
+
   var PREVIEW_NOTES = {
     sample_patron: function () {
       return [
@@ -965,7 +1118,15 @@
     },
     sample: function (v) {
       return messageNodes(
-        __("%s: the patron has none, an example record is used."),
+        __("%s: none is related to these records, an example record is used."),
+        [v],
+      );
+    },
+    partial: function (v) {
+      return messageNodes(
+        __(
+          "%s: none is related to all these records, one related to some of them is used.",
+        ),
         [v],
       );
     },
@@ -992,27 +1153,32 @@
     },
   };
 
-  // The notice as it is shown to patrons: sanitized, in a shadow DOM so that the
-  // CSS of the notice and of the page do not apply to each other
+  // The notice as it is shown to patrons, in a sandboxed frame as Koha shows
+  // the notices of patrons (bug 33260): nothing in it can run, and the CSS of
+  // the notice and of the page do not apply to each other
   function noticePreview(html) {
-    var host = document.createElement("div");
-    host.attachShadow({ mode: "open" }).innerHTML = DOMPurify.sanitize(html, {
-      WHOLE_DOCUMENT: true,
-    });
-    return host;
+    return $('<iframe class="notice-preview-frame" sandbox=""></iframe>')
+      .attr("title", __("Notice content"))
+      .attr("srcdoc", html)
+      .css({ border: 0, height: "60vh", width: "100%" })[0];
   }
 
   function showPreview(response, source) {
     var body = $("<div></div>");
     response.messages.forEach(function (message) {
-      var text =
-        message.code === "no_patron"
-          ? __("No patron with the card number '%s' was found.")
-          : __("No item with the barcode '%s' was found.");
       body.append(
-        $('<div class="alert alert-warning"></div>').text(
-          text.format(message.value),
-        ),
+        message.code === "combined"
+          ? $('<div class="alert alert-info"></div>').text(
+              __(
+                "The notices for %s items are combined into one message, as they are when sent.",
+              ).format(message.value),
+            )
+          : $('<div class="alert alert-warning"></div>').text(
+              __("%s '%s' was not found.").format(
+                message.kind === "item" ? __("Item") : recordName(message.kind),
+                message.value,
+              ),
+            ),
       );
     });
     if (response.patron) {
@@ -1036,7 +1202,9 @@
       body.append(
         $('<div class="alert alert-info preview-notes"></div>').append(
           $("<span></span>").text(
-            __("Some data of this preview is not the patron's own:"),
+            __(
+              "Some data of this preview does not come from the records it is previewed with:",
+            ),
           ),
           list,
         ),
@@ -1061,6 +1229,18 @@
     $("#preview_template .modal-body").empty().append(body, row);
   }
 
+  // The records entered to preview the notice with, by kind
+  function previewRecords() {
+    var records = {};
+    $(".preview_record").each(function () {
+      var value = $(this).val().trim();
+      if (value) {
+        records[$(this).data("kind")] = value;
+      }
+    });
+    return records;
+  }
+
   $(document).ready(function () {
     var form = $("#add_notice");
     var code = $("#code");
@@ -1068,33 +1248,14 @@
       return;
     }
 
-    // The records to preview with, instead of the "Data for preview" of core
+    // The records to preview with, instead of the "Data for preview" of core:
+    // filled with those the notice receives when its fields are loaded
     $("#data_preview").closest("li").remove();
-    $("#name")
-      .closest("li")
-      .after(
-        $("<li></li>").append(
-          $('<label for="preview_patron"></label>').text(
-            __("Preview with patron:"),
-          ),
-          $('<input type="text" id="preview_patron" />').attr(
-            "placeholder",
-            __("Card number"),
-          ),
-          $('<label for="preview_barcode" class="inline"></label>').text(
-            " " + __("and item:") + " ",
-          ),
-          $('<input type="text" id="preview_barcode" />').attr(
-            "placeholder",
-            __("Barcode"),
-          ),
-          $('<div class="hint"></div>').text(
-            __(
-              "Optional. The preview uses the records of the patron (their checkouts, holds, charges...), or examples when they have none.",
-            ),
-          ),
-        ),
-      );
+    if (!$("#notice_editor_preview_records").length) {
+      $("#name")
+        .closest("li")
+        .after($('<li id="notice_editor_preview_records"></li>').hide());
+    }
 
     // A preview for every template, instead of the previews of core
     $(".preview_template").closest("li").remove();
@@ -1113,6 +1274,17 @@
       fieldset.children("ol").append($("<li></li>").append(preview));
     });
 
+    // Enter in the records to preview with previews the template shown,
+    // instead of submitting the notice
+    $("body").on("keydown", ".preview_record", function (e) {
+      if (e.key !== "Enter") {
+        return;
+      }
+      e.preventDefault();
+      $("fieldset.mtt:visible .notice_editor_preview").first().trigger("click");
+    });
+
+    var preview_request;
     $("body").on("click", ".notice_editor_preview", function (e) {
       e.preventDefault();
       var mtt = $(this).data("mtt");
@@ -1120,7 +1292,12 @@
       var content = $("#content_" + mtt + "_" + lang).val();
       $("#preview_template .modal-body").html(modal_loading);
       $("#preview_template").modal("show");
-      $.ajax({
+      // Only the latest preview is shown: a slower earlier one must not
+      // replace it
+      if (preview_request) {
+        preview_request.abort();
+      }
+      var request = $.ajax({
         url: API + "/preview",
         type: "POST",
         contentType: "application/json",
@@ -1134,14 +1311,17 @@
           content: content,
           is_html: $("#is_html_" + mtt + "_" + lang).is(":checked"),
           style: $("#style_" + lang).val() || "",
-          patron: $("#preview_patron").val(),
-          barcode: $("#preview_barcode").val(),
+          records: previewRecords(),
         }),
-      }).then(
+      });
+      preview_request = request;
+      request.then(
         function (response) {
+          if (request !== preview_request) return;
           showPreview(response, content);
         },
-        function () {
+        function (xhr, status) {
+          if (request !== preview_request || status === "abort") return;
           $("#preview_template .modal-body")
             .empty()
             .append(

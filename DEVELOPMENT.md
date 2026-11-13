@@ -18,6 +18,10 @@ copied to the other until the bugs are in a Koha release:
 | `js/notice-editor.js` | `koha-tmpl/intranet-tmpl/prog/js/letter.js` |
 | `css/notice-editor.css` | the styles of `koha-tmpl/intranet-tmpl/prog/en/modules/tools/letter.tt` |
 
+Where Koha versions differ, the plugin works with each: e.g. `Preview.pm`
+uses `Koha::Policy::Circulation->circ_control_library` when it exists, and
+`C4::Circulation::_GetCircControlBranch` on Koha 26.05.
+
 `Variables.pm` lists the data each notice receives. When Koha adds or
 changes a notice, update it: `t/db_dependent/NoticeEditor/SampleNotices.t`
 fails when a sample notice of the Koha version tested is not listed.

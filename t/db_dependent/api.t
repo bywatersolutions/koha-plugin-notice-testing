@@ -152,7 +152,7 @@ subtest 'validate() variable problems' => sub {
 };
 
 subtest 'fields() tests' => sub {
-    plan tests => 9;
+    plan tests => 17;
 
     $schema->storage->txn_begin;
 
@@ -161,18 +161,28 @@ subtest 'fields() tests' => sub {
     my $userid = librarian('edit_notices');
     $t->get_ok("//$userid:$password\@$base/fields?module=bookings&code=BOOKING_CONFIRMATION")
         ->status_is(200)
-        ->json_is( '/insert_syntaxes' => ['tt'] );
+        ->json_is( '/insert_syntaxes' => ['tt'] )
+        ->json_is( '/preview_records' => ['booking'] );
 
     $t->get_ok("//$userid:$password\@$base/fields?module=claimacquisition&code=ACQCLAIM")
         ->status_is(200)
         ->json_is( '/insert_syntaxes' => [ 'bespoke', 'mixed' ] )
-        ->json_has( '/only_bespoke/0' );
+        ->json_has('/only_bespoke/0');
+
+    $t->get_ok("//$userid:$password\@$base/fields?module=orderacquisition&code=ACQORDER")
+        ->status_is(200)
+        ->json_is( '/preview_records' => [ 'basket', 'vendor' ] );
+
+    $t->get_ok("//$userid:$password\@$base/fields?module=circulation&code=CHECKOUT")
+        ->status_is(200)
+        ->json_is( '/preview_records'  => [ 'patron', 'item' ] )
+        ->json_is( '/preview_combines' => Mojo::JSON->true );
 
     $schema->storage->txn_rollback;
 };
 
 subtest 'preview() tests' => sub {
-    plan tests => 11;
+    plan tests => 15;
 
     $schema->storage->txn_begin;
 
@@ -184,7 +194,7 @@ subtest 'preview() tests' => sub {
         title                  => 'Expiry',
         content                => '<h1>Hello [% borrower.firstname %]</h1> [% branch.branchcode %]',
         is_html                => Mojo::JSON->true,
-        patron                 => $patron->cardnumber,
+        records                => { patron => $patron->cardnumber },
     };
 
     $t->post_ok( "$base/preview" => json => $body )->status_is(401);
@@ -196,11 +206,27 @@ subtest 'preview() tests' => sub {
         ->json_like( '/html' => qr{<h1>Hello \Q@{[ $patron->firstname ]}\E</h1> \Q@{[ $patron->branchcode ]}\E} )
         ->json_is( '/messages' => [] );
 
-    $t->post_ok(
-        "//$userid:$password\@$base/preview" => json => { %$body, patron => 'NOT_A_CARDNUMBER', is_html => Mojo::JSON->false } )
+    $t->post_ok( "//$userid:$password\@$base/preview" => json =>
+            { %$body, records => { patron => 'NOT_A_CARDNUMBER' }, is_html => Mojo::JSON->false } )
         ->status_is(200)
-        ->json_is( '/messages/0/code' => 'no_patron' )
-        ->json_like( '/html' => qr{^<div style="white-space: pre-wrap;">} );
+        ->json_is( '/messages/0' => { code => 'not_found', kind => 'patron', value => 'NOT_A_CARDNUMBER' } )
+        ->json_like(
+        '/html' => qr{^<pre style="white-space: pre-wrap;">&lt;h1&gt;Hello },
+        'Plain text notices are shown as text'
+        );
+
+    my @items = map { $builder->build_sample_item } 1 .. 2;
+    $t->post_ok(
+        "//$userid:$password\@$base/preview" => json => {
+            %$body,
+            module  => 'circulation', code => 'CHECKOUT', is_html => Mojo::JSON->false,
+            content => "Hi\n----\n[% item.barcode %]\n----\nBye",
+            records => { patron => $patron->cardnumber, item => join( ', ', map { $_->barcode } @items ) },
+        }
+        )
+        ->status_is(200)
+        ->json_is( '/messages/0' => { code => 'combined', value => '2' } )
+        ->json_like( '/html' => qr{Hi\n\Q@{[ $items[0]->barcode ]}\E\n\Q@{[ $items[1]->barcode ]}\E\nBye} );
 
     $schema->storage->txn_rollback;
 };

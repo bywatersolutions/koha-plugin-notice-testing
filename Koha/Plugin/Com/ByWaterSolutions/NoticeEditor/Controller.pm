@@ -20,12 +20,11 @@ use Modern::Perl;
 use Mojo::Base 'Mojolicious::Controller';
 
 use Mojo::JSON;
-use Try::Tiny qw( catch try );
+use HTML::Entities qw( encode_entities );
+use Try::Tiny      qw( catch try );
 
 use C4::Letters;
-use Koha::Items;
 use Koha::Notice::Message;
-use Koha::Patrons;
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks;
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Fields;
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview;
@@ -60,6 +59,7 @@ sub validate {
                     module                 => $body->{module},
                     code                   => $body->{code} // q{},
                     message_transport_type => $template->{message_transport_type},
+                    lang                   => $template->{lang},
                     title                  => $title,
                     content                => $content,
                 }
@@ -113,6 +113,17 @@ sub fields {
                 %$fields,
                 insert_syntaxes =>
                     [ sort grep { $fields->{insert_syntaxes}->{$_} } keys %{ $fields->{insert_syntaxes} } ],
+                preview_combines => Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->combines(
+                    $c->param('module'), $c->param('code')
+                    )
+                ? Mojo::JSON->true
+                : Mojo::JSON->false,
+                preview_records => $c->param('code')
+                ? Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->inputs(
+                    $c->param('module'),
+                    $c->param('code')
+                    )
+                : [],
             },
         );
     } catch {
@@ -122,8 +133,8 @@ sub fields {
 
 =head3 preview
 
-Controller method that renders a notice template with the records of a patron,
-as shown to patrons: with the CSS of notices (Koha bug 38105). The data comes
+Controller method that renders a notice template with the records given (a
+patron, a basket...), as shown to patrons: with the CSS of notices (Koha bug 38105). The data comes
 from Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview (Koha bug 29490).
 
 =cut
@@ -134,46 +145,70 @@ sub preview {
     my $body = $c->req->json;
 
     return try {
-        my @messages;
-        my ( $patron, $item );
-        if ( my $cardnumber = $body->{patron} ) {
-            $patron = Koha::Patrons->find( { cardnumber => $cardnumber } )
-                || Koha::Patrons->find( { userid => $cardnumber } );
-            push @messages, { code => 'no_patron', value => $cardnumber } unless $patron;
-        }
-        if ( my $barcode = $body->{barcode} ) {
-            $item = Koha::Items->find( { barcode => $barcode } );
-            push @messages, { code => 'no_item', value => $barcode } unless $item;
+
+        # Notices combining items can be previewed with several, separated by
+        # commas or spaces
+        my $code     = $body->{code} // q{};
+        my $combines = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->combines( $body->{module}, $code );
+        my ( @messages, %records, @items );
+        for my $kind ( sort keys %{ $body->{records} || {} } ) {
+            my $value = $body->{records}->{$kind};
+            next unless defined $value && $value ne q{};
+            my @values = $kind eq 'item' && $combines ? grep { $_ ne q{} } split /[\s,]+/, $value : ($value);
+            for my $value (@values) {
+                my $record = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->find_record( $kind, $value );
+                if ($record) {
+                    $records{$kind} //= $record;
+                    push @items, $record if $kind eq 'item';
+                } else {
+                    push @messages, { code => 'not_found', kind => $kind, value => $value };
+                }
+            }
         }
 
         my $preview = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->new(
-            { module => $body->{module}, code => $body->{code} // q{}, patron => $patron, item => $item } );
+            { module => $body->{module}, code => $code, records => \%records, items => \@items } );
 
+        # The letter prepared for each item (or once), combined as queued notices are
         my $mtt     = $body->{message_transport_type} || 'email';
         my $is_html = $body->{is_html} ? 1 : 0;
-        my $letter  = C4::Letters::GetPreparedLetter(
-            letter => {
-                title   => $body->{title}   // q{},
-                content => $body->{content} // q{},
-                is_html => $is_html,
-                lang    => $body->{lang} || 'default',
-            },
-            message_transport_type => $mtt,
-            %{ $preview->letter_params },
-        );
-
-        # As Koha::Notice::Message->html_content shows sent notices, and with the
-        # CSS of the notice itself for printed ones
-        my $html = Koha::Notice::Message->new(
-            {
-                subject                => $letter->{title},
-                content                => $letter->{content},
-                content_type           => $is_html ? 'text/html; charset="UTF-8"' : undef,
+        my @letters = map {
+            C4::Letters::GetPreparedLetter(
+                letter => {
+                    title   => $body->{title}   // q{},
+                    content => $body->{content} // q{},
+                    is_html => $is_html,
+                    lang    => $body->{lang} || 'default',
+                },
                 message_transport_type => $mtt,
+                %$_,
+            )
+        } @{ $preview->letter_params_list };
+        my $letter = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview->combine_letters( \@letters ) // {};
+        push @messages, { code => 'combined', value => $preview->combined . q{} } if $preview->combined;
+
+        # HTML notices as Koha::Notice::Message->html_content shows sent notices,
+        # and with the CSS of the notice itself for printed ones. Plain text
+        # notices are sent and printed as text: tags are shown as they are, in a
+        # <pre> as on printed slips, without the notice CSS
+        my $html;
+        if ($is_html) {
+            $html = Koha::Notice::Message->new(
+                {
+                    subject                => $letter->{title},
+                    content                => $letter->{content},
+                    content_type           => 'text/html; charset="UTF-8"',
+                    message_transport_type => $mtt,
+                }
+            )->html_content;
+            if ( $mtt eq 'print' && $body->{style} ) {
+                $html =~ s{</head>}{<style type="text/css">$body->{style}</style>\n</head>};
             }
-        )->html_content;
-        if ( $is_html && $mtt eq 'print' && $body->{style} ) {
-            $html =~ s{</head>}{<style type="text/css">$body->{style}</style>\n</head>};
+        } else {
+            $html =
+                  '<pre style="white-space: pre-wrap;">'
+                . encode_entities( $letter->{content} // q{}, '<>&"' )
+                . '</pre>';
         }
 
         my $previewed_for = $preview->patron;

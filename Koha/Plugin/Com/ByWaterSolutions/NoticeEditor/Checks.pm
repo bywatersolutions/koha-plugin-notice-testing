@@ -57,10 +57,10 @@ The methods are copies of those of Koha::Notice::Template (Koha bugs 39716 and
 
 sub new {
     my ( $class, $params ) = @_;
-    return bless { map { $_ => $params->{$_} } qw( module code message_transport_type title content ) }, $class;
+    return bless { map { $_ => $params->{$_} } qw( module code message_transport_type lang title content ) }, $class;
 }
 
-=head3 module, code, message_transport_type, title, content
+=head3 module, code, message_transport_type, lang, title, content
 
 Accessors, as for Koha::Notice::Template
 
@@ -68,6 +68,7 @@ Accessors, as for Koha::Notice::Template
 
 sub module                 { return $_[0]->{module} }
 sub code                   { return $_[0]->{code} }
+sub lang                   { return $_[0]->{lang} }
 sub message_transport_type { return $_[0]->{message_transport_type} }
 sub title                  { return $_[0]->{title} }
 sub content                { return $_[0]->{content} }
@@ -212,10 +213,10 @@ content lists them neither with a Template Toolkit loop on I<loop> (FOREACH, or
 I<loop>.next) nor with one of the bespoke I<tokens> or I<tags>. SMS templates
 are not checked, as they often only give the number of records.
 
-=item unknown_variable, unknown_method, missing_plugin, unknown_block
+=item unknown_variable, unknown_method, unknown_key, missing_plugin, unknown_block
 
-The I<field> uses a variable, field, plugin or block that will not be
-available when the notice is generated. See
+The I<field> uses a variable, field, key of a hash, plugin or block that will
+not be available when the notice is generated. See
 L<Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator/check_variables>.
 
 =back
@@ -226,6 +227,12 @@ sub validate {
     my ($self) = @_;
 
     my @problems;
+
+    # The variables the notice receives, which can have the name of a directive
+    # (e.g. the set of OAI_HARVEST_REPORT)
+    require Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
+    my $received =
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->for_notice( $self->module, $self->code ) // {};
 
     for my $field (qw( title content )) {
         my $text = $self->$field // q{};
@@ -249,7 +256,7 @@ sub validate {
 
         push @problems, map {
             { %$_, severity => $compiles ? 'warning' : 'error', field => $field }
-        } _lowercase_directives($text);
+        } _lowercase_directives( $text, $received );
 
         next if $compiles;
 
@@ -313,14 +320,16 @@ sub validate {
 
 =head3 _lowercase_directives
 
-    my @problems = _lowercase_directives($text);
+    my @problems = _lowercase_directives( $text, $variables );
 
 Returns a lowercase_directive problem (see L</validate>), without severity nor
 field, for each Template Toolkit directive not written in capitals in the tags
 of I<$text>: at the start of a statement, or after an expression for those that
 can be (e.g. [% name if name %]). Words used as variables by the template (e.g.
 [% SET last = 1 %]) are not reported, nor ones followed by a field, arguments
-or an assignment (e.g. loop.last, item.in).
+or an assignment (e.g. loop.last, item.in). Nor are words in I<$variables> (a
+hashref of variable names, e.g. those the notice receives) used as variables:
+[% set %] is the variable set, [% set x = 1 %] the directive SET.
 
 =cut
 
@@ -329,11 +338,14 @@ my @TT_DIRECTIVES = qw(
     MACRO META NEXT PERL PROCESS RAWPERL RETURN SET STOP SWITCH TAGS THROW TRY UNLESS USE VIEW WHILE WRAPPER
 );
 
+# Words that can follow a variable: directives and operators
+my %TT_KEYWORDS = map { $_ => 1 } @TT_DIRECTIVES, qw( IN and or not mod div AND OR NOT MOD DIV );
+
 # Directives that can follow an expression, e.g. [% name IF name %]
 my %TT_TRAILING = map { $_ => 1 } qw( IF UNLESS FOR FOREACH WHILE FILTER );
 
 sub _lowercase_directives {
-    my ($text) = @_;
+    my ( $text, $received ) = @_;
 
     my %directives = map { lc($_) => $_ } @TT_DIRECTIVES, 'IN';
 
@@ -362,6 +374,15 @@ sub _lowercase_directives {
             my $directive = $directives{ lc $word };
             next if !$directive || $word eq $directive || $variables{$word};
 
+            # A variable the notice receives (e.g. set), unless followed by what
+            # the directive takes (e.g. set x = 1): a filter, the end of the
+            # statement, an operator (e.g. set _ "x") or a directive (e.g. set
+            # IF set) can follow a variable
+            if ( $received && $received->{$word} ) {
+                my ($next) = substr( $tag->{tag}, $position + length $word ) =~ m{^\s+([A-Za-z]\w*)};
+                next unless $next && !$TT_KEYWORDS{$next};
+            }
+
             my $before = substr( $tag->{tag}, 0, $position );
             if ( $directive eq 'IN' ) {
                 next unless $before =~ m{\b(?:FOREACH|FOR)\s+\w+\s+$}i;
@@ -386,7 +407,9 @@ sub _lowercase_directives {
 
 Processes I<$text> as a notice template without any data, as the notice editor
 does when showing a notice, and returns the Template Toolkit error message if it
-fails. Some errors (e.g. an unknown filter) happen whatever the data is.
+fails. Some errors (e.g. an unknown filter) happen whatever the data is. The
+includes are those of the language of the notice, as when it is sent (for
+'default', the first of OPACLanguages, as GetPreparedLetter does).
 
 =cut
 
@@ -395,10 +418,13 @@ sub _processing_error {
 
     return if ( $text // q{} ) eq q{};
 
+    my $lang = $self->lang || 'default';
+    ($lang) = split /,/, C4::Context->preference('OPACLanguages') // q{} if $lang eq 'default';
+
     require C4::Letters;
     local $SIG{__WARN__} = sub { };    # Missing data gives 'not numeric' warnings
     return try {
-        C4::Letters::_process_tt( { content => $text } );
+        C4::Letters::_process_tt( { content => $text, lang => $lang || 'en' } );
         return;
     } catch {
         my $error = "$_";

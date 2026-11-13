@@ -91,7 +91,7 @@ subtest 'repeatable_content() tests' => sub {
 };
 
 subtest 'validate() tests' => sub {
-    plan tests => 17;
+    plan tests => 19;
 
     $schema->storage->txn_begin;
 
@@ -168,6 +168,31 @@ subtest 'validate() tests' => sub {
         )->validate,
         [],
         'Variables, fields, strings, comments and lowercase operators are not reported'
+    );
+
+    is_deeply(
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
+            {
+                module  => 'catalogue', code => 'OAI_HARVEST_REPORT', title => 'Hi',
+                content => "Set: [% set %] [% set | html %] [% set IF set %] [% set _ ' (' _ endpoint _ ')' %]"
+            }
+        )->validate,
+        [],
+        'A variable the notice receives with the name of a directive is not reported (the set of OAI harvests)'
+    );
+    is_deeply(
+        [
+            map { join ' ', $_->{type}, $_->{severity}, @{ $_->{lines} || [] } }
+                @{ Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(
+                    {
+                        module  => 'catalogue', code => 'OAI_HARVEST_REPORT', title => 'Hi',
+                        content => "Set: [% set %]\n[% set x = 1 %]"
+                    }
+                )->validate
+                }
+        ],
+        [ 'lowercase_directive error 2', 'tt_syntax error 2' ],
+        '... but it is when it is used as the directive, even if the template cannot be parsed'
     );
 
     $problems = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Checks->new(

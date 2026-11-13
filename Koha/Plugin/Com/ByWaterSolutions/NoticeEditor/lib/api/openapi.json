@@ -97,7 +97,7 @@
                                                 "properties": {
                                                     "type": {
                                                         "type": "string",
-                                                        "description": "The kind of problem:\n\n* `tt_syntax`: the Template Toolkit markup cannot be parsed\n* `unclosed_tag`: a `[%` has no matching `%]`\n* `lowercase_directive`: a Template Toolkit directive not written in capitals\n* `tt_error`: processing the template without data fails\n* `missing_repeatable_content`: the notice receives a list of records,\n  but the template has nothing to list them with\n* `unknown_variable`: a variable the notice does not receive\n* `unknown_method`: a field or method that does not exist on an object\n* `unknown_key`: a key that a hash whose keys are known does not have\n* `missing_plugin`: a plugin used without being loaded\n* `unknown_block`: a block processed but not defined\n"
+                                                        "description": "The kind of problem:\n\n* `tt_syntax`: the Template Toolkit markup cannot be parsed\n* `unclosed_tag`: a `[%` has no matching `%]`\n* `lowercase_directive`: a Template Toolkit directive not written in capitals\n* `tt_error`: processing the template without data fails\n* `missing_repeatable_content`: the notice receives a list of records,\n  but the template has nothing to list them with\n* `unknown_variable`: a variable the notice does not receive\n* `unknown_method`: a field or method that does not exist on an object\n* `unknown_key`: a key that does not exist in a hash (only checked when\n  the hash's keys are listed, e.g. `branch` on SR_SLIP)\n* `missing_plugin`: a plugin used without being loaded\n* `unknown_block`: a block processed but not defined\n"
                                                     },
                                                     "severity": {
                                                         "type": "string",
@@ -335,7 +335,7 @@
             ],
             "responses": {
                 "200": {
-                    "description": "The fields, and the syntaxes the notice can use",
+                    "description": "The fields, the syntaxes the notice can use, and the records it can be previewed with",
                     "schema": {
                         "type": "object",
                         "properties": {
@@ -401,12 +401,41 @@
                                 "items": {
                                     "type": "string"
                                 }
+                            },
+                            "preview_records": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "patron",
+                                        "item",
+                                        "basket",
+                                        "order",
+                                        "vendor",
+                                        "hold",
+                                        "suggestion",
+                                        "illrequest",
+                                        "booking",
+                                        "article_request",
+                                        "recall",
+                                        "ticket",
+                                        "subscription",
+                                        "oai_server"
+                                    ]
+                                },
+                                "description": "Kinds of records the notice can be previewed with, in the order to offer them"
+                            },
+                            "preview_combines": {
+                                "type": "boolean",
+                                "description": "Whether the notice is sent once per item and combined, so it can be previewed with several items"
                             }
                         },
                         "required": [
                             "fields",
                             "insert_syntaxes",
-                            "only_bespoke"
+                            "only_bespoke",
+                            "preview_records",
+                            "preview_combines"
                         ],
                         "additionalProperties": false
                     }
@@ -553,13 +582,54 @@
                                 "type": "string",
                                 "description": "CSS of the notice, for print templates"
                             },
-                            "patron": {
-                                "type": "string",
-                                "description": "Card number of the patron to preview the notice for"
-                            },
-                            "barcode": {
-                                "type": "string",
-                                "description": "Barcode of the item to preview the notice with"
+                            "records": {
+                                "type": "object",
+                                "description": "The records to preview the notice with, by kind (e.g. patron, basket): a card number for a patron, a barcode for an item (several, separated by commas, for notices combining items), an id or name for a vendor or an OAI server, an id for the others",
+                                "properties": {
+                                    "patron": {
+                                        "type": "string"
+                                    },
+                                    "item": {
+                                        "type": "string"
+                                    },
+                                    "basket": {
+                                        "type": "string"
+                                    },
+                                    "order": {
+                                        "type": "string"
+                                    },
+                                    "vendor": {
+                                        "type": "string"
+                                    },
+                                    "hold": {
+                                        "type": "string"
+                                    },
+                                    "suggestion": {
+                                        "type": "string"
+                                    },
+                                    "illrequest": {
+                                        "type": "string"
+                                    },
+                                    "booking": {
+                                        "type": "string"
+                                    },
+                                    "article_request": {
+                                        "type": "string"
+                                    },
+                                    "recall": {
+                                        "type": "string"
+                                    },
+                                    "ticket": {
+                                        "type": "string"
+                                    },
+                                    "subscription": {
+                                        "type": "string"
+                                    },
+                                    "oai_server": {
+                                        "type": "string"
+                                    }
+                                },
+                                "additionalProperties": false
                             }
                         },
                         "required": [
@@ -597,12 +667,32 @@
                                         "code": {
                                             "type": "string",
                                             "enum": [
-                                                "no_patron",
-                                                "no_item"
+                                                "not_found",
+                                                "combined"
                                             ]
                                         },
                                         "value": {
                                             "type": "string"
+                                        },
+                                        "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                                "patron",
+                                                "item",
+                                                "basket",
+                                                "order",
+                                                "vendor",
+                                                "hold",
+                                                "suggestion",
+                                                "illrequest",
+                                                "booking",
+                                                "article_request",
+                                                "recall",
+                                                "ticket",
+                                                "subscription",
+                                                "oai_server"
+                                            ],
+                                            "description": "Kind of the record not found"
                                         }
                                     },
                                     "required": [

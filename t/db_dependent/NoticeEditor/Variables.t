@@ -54,7 +54,7 @@ subtest 'for_notice() tests' => sub {
     );
     ok(
         $strict->{overdues} && !$strict->{credit},
-        'strict: the variables of the codes chosen by the library for others'
+        'strict: the variables of the \'*\' entry for a custom code'
     );
 
     is(
@@ -126,7 +126,7 @@ subtest 'plugin_content_namespaces() tests' => sub {
 };
 
 subtest 'plugin_content_type() tests' => sub {
-    plan tests => 4;
+    plan tests => 6;
 
     # Enabled plugins adding content to notices: one describing it for HOLD
     # notices, one whose description fails, and one not describing it
@@ -149,6 +149,21 @@ subtest 'plugin_content_type() tests' => sub {
         sub notices_content_variables { die "Failed\n" }
     }
 
+    package Test::Malformed {
+        sub new             { return bless {}, shift }
+        sub get_metadata    { return { namespace => 'malformed', name => 'Malformed' } }
+        sub notices_content { return {} }
+
+        sub notices_content_variables {
+            return {
+                title  => 'scalar',
+                item   => { kind => 'object' },
+                name   => { kind => 'scalar' },
+                nested => { kind => 'hash', keys => { a => 'x', b => { kind => 'scalar' } } },
+            };
+        }
+    }
+
     package Test::NotDescribed {
         sub new             { return bless {}, shift }
         sub get_metadata    { return { namespace => 'other', name => 'Other' } }
@@ -156,8 +171,9 @@ subtest 'plugin_content_type() tests' => sub {
     }
     t::lib::Mocks::mock_config( 'enable_plugins', 1 );
     my $plugins = Test::MockModule->new('Koha::Plugins');
-    $plugins->mock(
-        get_enabled_plugins => sub { return ( Test::Described->new, Test::Failing->new, Test::NotDescribed->new ) } );
+    $plugins->mock( get_enabled_plugins =>
+            sub { return ( Test::Described->new, Test::Failing->new, Test::Malformed->new, Test::NotDescribed->new ) }
+    );
 
     my $variables = 'Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables';
     my $hold      = $variables->plugin_content_type( 'reserves', 'HOLD' )->{keys};
@@ -172,6 +188,28 @@ subtest 'plugin_content_type() tests' => sub {
     my $checkout = $variables->plugin_content_type( 'circulation', 'CHECKOUT' )->{keys};
     ok( !exists $checkout->{rapido}, 'Plugins adding no content to the notice are left out' );
     ok( exists $checkout->{other},   '... but not the ones that do not describe it' );
+
+    is_deeply(
+        $hold->{malformed},
+        {
+            kind => 'hash',
+            keys => {
+                title  => { kind => 'unknown' },
+                item   => { kind => 'unknown' },
+                name   => { kind => 'scalar' },
+                nested => { kind => 'hash', keys => { a => { kind => 'unknown' }, b => { kind => 'scalar' } } },
+            }
+        },
+        'Types the hook does not describe properly are not known'
+    );
+    require Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator;
+    is_deeply(
+        Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator->new( { module => 'reserves', code => 'HOLD' } )
+            ->check_variables(
+            '[% plugin_content.malformed.title.x %][% FOREACH x IN plugin_content.malformed.title %][% END %]'),
+        [],
+        '... and do not break checking templates'
+    );
 };
 
 subtest 'keys_of() tests' => sub {

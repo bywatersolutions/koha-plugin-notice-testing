@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Previews offer the records each notice receives instead of always a patron and an item: e.g. a basket and a vendor for ACQORDER, a vendor for claims, a patron, an item and a hold for hold notices, a suggestion, an ILL request, a booking... Notices not known get a patron and an item
+- The records related to those given are used: the vendor and orders of a basket, the patron and item of a hold, the patron who made a suggestion...
+- Notices sent once per item and combined into one message (CHECKOUT, CHECKIN, RENEWAL, HOLD, HOLDDGST) can be previewed with several items, or the patron's, combined as Koha does: lines of ---- separate the header and footer from what is repeated for each item
+- OAI_HARVEST_REPORT is previewed with an OAI server, whose name, endpoint, set, data format and record type are shown instead of placeholders
+- Notices that receive no patron (e.g. acquisition notices) are no longer previewed with an example patron
+- The preview API takes `records` (by kind) instead of `patron` and `barcode`, and the fields API returns the `preview_records` of the notice
+
+### Fixed
+
+- Template checks: [% set _ "x" %] (a variable the notice receives followed by the _ operator) is no longer reported as a lowercase SET; arguments of macros and parameters of INCLUDE and PROCESS are variables; all the virtual methods Template Toolkit has for hashes (e.g. empty, first) are accepted; long templates are checked faster; processing errors use the includes of the language of the notice
+- Previews: the latest related record is used, related to all the records given when possible (with a note otherwise); a hold on a record gets an item of that record; only the columns the database declares as relationships are followed (e.g. not the free text booksellerid of items)
+- Notices that set a variable they receive to another kind of value (e.g. [% WHILE (item = overdues.next) %] in overdue notices) are no longer reported as errors, which prevented saving them
+- Malformed descriptions from the notices_content_variables hook of a plugin no longer break the notice editor, and hook failures are logged
+- Previews: <<table.column>> values are formatted as in sent notices (e.g. dates); HOLD notices are no longer combined (only HOLDDGST is); [% branch %] is the library the notice is sent with (the pickup library of holds, the circulation control library of checkouts); Enter in the preview fields previews instead of saving the notice
+- A variable the notice receives with the name of a directive (the [% set %] of OAI_HARVEST_REPORT) is no longer reported as a lowercase directive
+- Templates without "HTML message" ticked are previewed as text, tags included, as they are sent and printed, instead of being rendered as HTML
+- Previews of combined notices have the subject of the first item, as Koha keeps the subject of the first notice queued
+- Previews are shown in a sandboxed frame, as Koha shows the notices of patrons (bug 33260): nothing in a notice can run, the *NoticeStylesheet stylesheets are loaded and CSS on body applies
+- Only the latest preview is shown: a slower earlier one no longer replaces it
+- While the templates are checked before saving, the Save button shows "Saving..." and the notice cannot be saved twice
+- The problems and line numbers of a template are cleared when it is emptied; the line numbers follow edits without slowing typing in long templates
+- The list of fields and the message body share the width of their template, so that they stay within it whatever the width of the screen: the list takes about a third of it (long names are shown in full on hover), the message body the rest instead of a fixed 80 columns, and the "Insert as:" choices wrap
+- "and N more" is translated with plural forms, "or" without its spaces, and the "Insert as:" radio buttons are labelled as a group for screen readers
+
 ## [1.0.0] - 2026-11-10
 
 ### Added

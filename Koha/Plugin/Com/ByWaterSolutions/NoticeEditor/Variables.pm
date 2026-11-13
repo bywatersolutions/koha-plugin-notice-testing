@@ -17,10 +17,11 @@ package Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
 
 use Modern::Perl;
 
-use Try::Tiny;
+use Try::Tiny qw( catch try );
 
 use C4::Context;
 use Koha::Database;
+use Koha::Logger;
 
 =head1 NAME
 
@@ -58,7 +59,11 @@ given as for hash
 Hashes with neither I<keys> nor I<tables> can have any keys (e.g. the columns
 of a report).
 
-It is a copy of Koha::Notice::Template::Variables (Koha bug 36588), for Koha
+Scalars taken from a record have I<from>: the kind of record and its field
+(e.g. 'oai_server.servername'), for previews (see
+Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Preview).
+
+It is a copy of Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables (Koha bug 36588), for Koha
 versions without it. Keep them in sync.
 
 =cut
@@ -76,9 +81,9 @@ my $STOCKROTATION_ITEM = {
 # The checkouts fetched by misc/cronjobs/advance_notices.pl
 my @ADVANCE_NOTICE_TABLES = qw( biblio items issues );
 
-# module => { code => { variable => type } }. The code '*' applies to every
-# code of the module: it lists the variables of notices whose code is chosen by
-# the library (e.g. in the overdue notice triggers).
+# module => { code => { variable => type } }. The code '*' lists the variables
+# of notices with a custom code: one that isn't listed here, created in the
+# notices tool (e.g. for the overdue notice triggers).
 our $VARIABLES = {
     acquisition => {
         'ACQ_NOTIF_ON_RECEIV' => {
@@ -153,13 +158,13 @@ our $VARIABLES = {
         },
         'OAI_HARVEST_REPORT' => {
             added      => { kind => 'scalar' },
-            dataformat => { kind => 'scalar' },
+            dataformat => { kind => 'scalar', from => 'oai_server.dataformat' },
             deleted    => { kind => 'scalar' },
-            endpoint   => { kind => 'scalar' },
+            endpoint   => { kind => 'scalar', from => 'oai_server.endpoint' },
             in_error   => { kind => 'scalar' },
-            recordtype => { kind => 'scalar' },
-            servername => { kind => 'scalar' },
-            set        => { kind => 'scalar' },
+            recordtype => { kind => 'scalar', from => 'oai_server.recordtype' },
+            servername => { kind => 'scalar', from => 'oai_server.servername' },
+            set        => { kind => 'scalar', from => 'oai_server.oai_set' },
             skipped    => { kind => 'scalar' },
             total      => { kind => 'scalar' },
             updated    => { kind => 'scalar' },
@@ -1168,12 +1173,15 @@ our $BESPOKE = {
 Returns a hashref of the variables the notice receives (name => type), or undef
 if they are not known.
 
-A listed code receives the variables of its entry. For a code that is not
-listed (one chosen by the library, e.g. in the overdue notice triggers), the
-variables any sender of the module may pass are included by default, so that
-checking a template never reports a variable that is available. With
-I<strict>, only the variables of the codes chosen by the library (code '*') are,
-for offering them in the editor.
+A notice whose code is listed receives the variables of that code's entry.
+
+A notice with a custom code (one that isn't listed, created in the notices tool,
+e.g. for the overdue notice triggers) may be sent by any of the module's
+senders. By default, it gets the variables of all the module's codes, so that
+checking its template never reports a variable that may be available. With
+I<strict>, it only gets the variables of the module's '*' entry, which custom
+codes always receive, so that the editor only offers variables that will be
+available.
 
 =cut
 
@@ -1238,13 +1246,12 @@ sub bespoke_for_notice {
 
 =head3 _merge_for_notice
 
-Merges, with I<$merge>, the entries of I<$list> for the notice. A code that is
-listed only receives what its own entry lists: its senders are known. A code
-that is not listed is one chosen by the library (e.g. in the overdue notice
-triggers), which may be sent by any of the module's senders, so the entries of
-all the codes of the module are merged then; with I<strict> (see
-L</for_notice>), only the entry for '*' is. Returns undef if the notice is not
-known.
+Merges, with I<$merge>, the entries of I<$list> for the notice. A listed code
+only gets its own entry, since its senders are known. A custom code (one that
+isn't listed, e.g. created for the overdue notice triggers) may be sent by any
+of the module's senders, so the entries of all the module's codes are merged;
+with I<strict> (see L</for_notice>), only the '*' entry is used. Returns undef
+if the notice is not known.
 
 =cut
 
@@ -1274,6 +1281,36 @@ Whether two variable types are the same kind of value, of the same class.
 sub _same_type {
     my ( $a, $b ) = @_;
     return $a->{kind} eq $b->{kind} && ( $a->{class} // q{} ) eq ( $b->{class} // q{} );
+}
+
+=head3 _valid_type
+
+    my $type = _valid_type($type);
+
+I<$type> if it is a variable type as described in L</DESCRIPTION> (checking
+the types of the keys of hashes), else the unknown type, so that types given by
+plugins cannot break the notice editor
+
+=cut
+
+my %KINDS = map { $_ => 1 } qw( object objects array_of_objects hash array_of_hashes scalar unknown );
+
+sub _valid_type {
+    my ($type) = @_;
+
+    my $kind = ref $type eq 'HASH' && $type->{kind};
+    return { kind => 'unknown' } unless defined $kind && !ref $kind && $KINDS{$kind};
+    return { kind => 'unknown' }
+        if $kind =~ /object/ && ( !defined $type->{class} || ref $type->{class} || $type->{class} eq q{} );
+
+    my %valid = ( kind => $kind );
+    $valid{class} = $type->{class} if $kind =~ /object/;
+    if ( $kind eq 'hash' || $kind eq 'array_of_hashes' ) {
+        $valid{keys} = { map { $_ => _valid_type( $type->{keys}->{$_} ) } keys %{ $type->{keys} } }
+            if ref $type->{keys} eq 'HASH';
+        $valid{tables} = [ grep { defined && !ref } @{ $type->{tables} } ] if ref $type->{tables} eq 'ARRAY';
+    }
+    return \%valid;
 }
 
 =head3 keys_of
@@ -1344,7 +1381,9 @@ Plugins describe the content they add with the notices_content_variables hook:
 It returns the variables of the content added to the notice (name => type, as
 in the lists of this module), or nothing when the plugin adds no content to
 it. The content of plugins without the hook (or whose hook fails) is not
-known: anything can be used under their namespace.
+known: anything can be used under their namespace. Types that are not
+described as above (e.g. a plain string instead of a hashref with a I<kind>)
+are not known either.
 
 =cut
 
@@ -1363,11 +1402,12 @@ sub plugin_content_type {
             $variables = $object->notices_content_variables( { module => $module, letter_code => $code } );
         } catch {
             $failed = 1;
+            Koha::Logger->get->warn("notices_content_variables of plugin $plugin->{namespace} failed: $_");
         };
         if ($failed) {
             $content{ $plugin->{namespace} } = { kind => 'unknown' };
         } elsif ( ref $variables eq 'HASH' && %$variables ) {
-            $content{ $plugin->{namespace} } = { kind => 'hash', keys => $variables };
+            $content{ $plugin->{namespace} } = _valid_type( { kind => 'hash', keys => $variables } );
         }
     }
     return { kind => 'hash', keys => \%content };

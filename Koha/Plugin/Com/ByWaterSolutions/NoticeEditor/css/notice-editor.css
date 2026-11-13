@@ -1,3 +1,28 @@
+/* The list of fields and the message body share the width of their
+ * template, whatever the width of the screen: the list takes about a third of
+ * it (names longer than that are shown in full on hover), and the message
+ * body the rest */
+.message_body_editor {
+    width: 100%;
+}
+.message_body_editor > tbody > tr > td:first-child {
+    width: 30%;
+}
+.message_body_editor > tbody > tr > td.actions {
+    white-space: nowrap;
+    width: 1%;
+}
+.message_body_editor select[name="SQLfieldname"] {
+    box-sizing: border-box;
+    min-width: 10rem;
+    width: 100%;
+}
+.message_body_editor textarea[name="content"] {
+    box-sizing: border-box;
+    min-width: 12em;
+    width: 100%;
+}
+
 /* Filter above the list of fields, as wide as it */
 .field_filter {
     box-sizing: border-box;
@@ -16,12 +41,10 @@ fieldset.rows .insert_syntax label {
     font-weight: normal;
     margin: 0;
     text-align: left;
-    white-space: nowrap;
     width: auto;
 }
 fieldset.rows .insert_syntax .hint {
     margin: 0.3rem 0 0 0;
-    max-width: 22em;
 }
 /* Problems found when checking a template: undo the list styles of fieldset.rows */
 .template_problems .alert ul {

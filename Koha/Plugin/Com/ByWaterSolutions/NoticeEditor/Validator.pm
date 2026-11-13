@@ -19,14 +19,19 @@ use Modern::Perl;
 
 use Module::Load::Conditional qw( can_load );
 use Template::Parser;
+use Template::Stash;
 
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig;
 use Koha::Database;
 use Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables;
 
-# Template Toolkit virtual methods of hashes, used when the hash has no such key
+# Template Toolkit virtual methods of hashes, used when the hash has no such key:
+# those of hashes, and those of lists, which hashes get as lists of one hash
 my %HASH_VMETHODS =
-    map { $_ => 1 } qw( defined delete each exists import item items keys list nsort pairs size sort values );
+    map { $_ => 1 } keys %$Template::Stash::HASH_OPS, keys %$Template::Stash::LIST_OPS;
+
+# What the compiled code of a variable used as a filter starts with
+my $FILTER_CALL = '$context->filter(';
 
 =head1 NAME
 
@@ -42,7 +47,6 @@ Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Validator - Check the Templat
 
 A copy of Koha::Notice::Template::Validator (Koha bug 43395), for Koha versions
 without it. Keep them in sync.
-
 
 Finds the variables a notice template uses that the notice will not receive
 when it is generated, by compiling the template with L<Template::Parser> and
@@ -72,6 +76,12 @@ sub new {
     };
     $self->{variables} =
         Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->for_notice( $self->{module}, $self->{code} );
+
+    # The content added by plugins, under the namespace of each
+    $self->{plugin_content} = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_type(
+        $self->{module},
+        $self->{code}
+    );
     return bless $self, $class;
 }
 
@@ -116,8 +126,10 @@ with [% USE I<plugin> %]. It is an error when the plugin is used as a filter
 
 =item unknown_key
 
-I<variable> (the path up to the problem, e.g. 'branch.nmae') is not one of the
-I<keys> of a hash whose keys are known. Template Toolkit prints nothing for it.
+I<variable> (the path up to the problem, e.g. 'branch.nmae') uses a key that
+does not exist in the hash; I<keys> lists the keys it has. Only hashes the
+registry lists the keys of are checked (e.g. SR_SLIP's branch). Template Toolkit
+prints nothing for it.
 
 =item unknown_block
 
@@ -146,18 +158,37 @@ sub check_variables {
         map { $_ => { kind => 'unknown' } } Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->globals,
     );
 
-    # The content added by plugins, under the namespace of each
-    $types{plugin_content} = Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables->plugin_content_type(
-        $self->{module},
-        $self->{code}
-    );
+    $types{plugin_content} = $self->{plugin_content};
 
-    # Variables defined by the template itself: SET, USE, MACRO, FOREACH
+    # A variable has one type for the whole template: one assigned values of
+    # different types (or values of another type than the notice passes) is
+    # not checked, as which one it has depends on where it is used
+    my $assign = sub {
+        my ( $name, $type ) = @_;
+        $types{$name} =
+            !exists $types{$name}
+            || Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::Variables::_same_type( $types{$name}, $type )
+            ? $type
+            : { kind => 'unknown' };
+    };
+
+    # Variables defined by the template itself: SET, USE, MACRO, WHILE (x = ...)
     while ( $code =~ m{\$stash->set\('((?:[^'\\]|\\.)*)',\s*(.*?)\);\n}gs ) {
         my ( $name, $value ) = ( $1, $2 );
-        next if $self->{variables} && exists $self->{variables}->{$name};  # Redefining a passed variable: keep its type
         my ($chain) = $value =~ m{^\$stash->get\((.*)\)$}s;
-        $types{$name} = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
+        $assign->( $name, $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' } );
+    }
+
+    # Arguments of MACROs, and parameters of INCLUDE and PROCESS: variables in
+    # the macro or block, whose values are not checked. As other variables, they
+    # are not scoped: their names are not reported outside it either
+    while ( $code =~ m{\@_tt_args\{\s*(.*?)\}\s*=}g ) {
+        my $names = $1;
+        $assign->( _unquote($1), { kind => 'unknown' } ) while $names =~ m{'((?:[^'\\]|\\.)*)'}g;
+    }
+    while ( $code =~ m{\$context->(?:process|include)\('(?:[^'\\]|\\.)*',\s*(?=\{)}g ) {
+        my $params = _balanced( $code, pos($code) ) // next;
+        $assign->( _unquote($1), { kind => 'unknown' } ) while $params =~ m{'((?:[^'\\]|\\.)*)'\s*=>}g;
     }
 
     # FOREACH: each list lookup is followed by the assignment of its loop
@@ -176,7 +207,7 @@ sub check_variables {
         my ($chain) = $lists[$i]->{list} =~ m{^\$stash->get\((.*)\)$}s;
         my $type    = $chain ? $self->_resolve( \%types, _parse_chain($chain) )->{type} : { kind => 'unknown' };
         if ( $body =~ m{\$stash->\{'((?:[^'\\]|\\.)*)'\} = \$_tt_value;} ) {
-            $types{$1} = _element_type($type);
+            $assign->( $1, _element_type($type) );
         } elsif ( $body =~ m{\$stash->get\(\['import',} && _element_type($type)->{kind} ne 'object' ) {
             my $scope = _localised( $code, $lists[$i]->{end} );
             push @imported, $scope if $scope;
@@ -195,7 +226,8 @@ sub check_variables {
             if defined $line && !grep { $_ == $line } @{ $found{$key}->{lines} };
     };
 
-    for my $lookup ( _variable_lookups($code) ) {
+    my $line_index = _line_index($code);
+    for my $lookup ( _variable_lookups( $code, $line_index ) ) {
         my $problem = $self->_resolve( \%types, $lookup->{chain} )->{problem} or next;
         next
             if $problem->{type} eq 'unknown_variable'
@@ -212,7 +244,7 @@ sub check_variables {
     my %blocks = map { $_ => 1 } keys %{ $parsed->{DEFBLOCKS} || {} };
     my @processed;
     while ( $code =~ m{\$context->(?:process|include)\('((?:[^'\\]|\\.)*)'}g ) {
-        push @processed, { name => _unquote($1), line => _line_at( $code, $-[0] ) };
+        push @processed, { name => _unquote($1), line => _line_at( $line_index, $-[0] ) };
     }
 
     # Files from the includes (e.g. PROCESS 'accounts.inc') can define blocks we don't see
@@ -228,8 +260,9 @@ sub check_variables {
 
     # Template Toolkit gives block directives (IF, FOREACH...) the line of their
     # END: find the lines in the template itself when possible
+    ( my $tags = $content ) =~ s{(\[%.*?%\])|[^\n]}{ defined $1 ? $1 : ' ' }gse;
     for my $problem (@problems) {
-        my @lines = _source_lines( $content, $problem );
+        my @lines = _source_lines( $tags, $problem );
         @lines = @{ $problem->{lines} } unless @lines;
         $problem->{lines} = [ sort { $a <=> $b } @lines ];
     }
@@ -337,7 +370,8 @@ does in notices (e.g. 'borrower' for 'patron')
 sub _suggestion {
     my ( $self, $name ) = @_;
 
-    my %usual_class = (
+    return $self->{suggestions}->{$name} if exists $self->{suggestions}->{$name};
+    $self->{usual_class} //= {
         patron  => 'Koha::Patron',
         library => 'Koha::Library',
         map {
@@ -346,15 +380,15 @@ sub _suggestion {
                 ? ( $config->{singular} => $config->{module}->object_class )
                 : ()
         } values %{ Koha::Plugin::Com::ByWaterSolutions::NoticeEditor::TableConfig::tt_table_config() },
-    );
-    my $class = $usual_class{$name} or return;
+    };
+    my $class = $self->{usual_class}->{$name} or return $self->{suggestions}->{$name} = undef;
 
     my ($suggestion) =
         sort grep {
         my $type = $self->{variables}->{$_};
         $type->{kind} eq 'object' && ( $type->{class} // q{} ) eq $class
         } keys %{ $self->{variables} };
-    return $suggestion;
+    return $self->{suggestions}->{$name} = $suggestion;
 }
 
 =head3 _object_step
@@ -450,7 +484,8 @@ variable is not a lookup of a variable, and is left out.
 =cut
 
 sub _variable_lookups {
-    my ($code) = @_;
+    my ( $code, $line_index ) = @_;
+    $line_index //= _line_index($code);
     my @lookups;
     while ( $code =~ m{\$stash->get\(}g ) {
         my $start = pos($code);
@@ -463,8 +498,9 @@ sub _variable_lookups {
         push @lookups, {
             chain  => _parse_chain($args),
             at     => $at,
-            line   => _line_at( $code, $at ),
-            filter => substr( $code, 0, $at ) =~ m{\$context->filter\($} ? 1 : 0,
+            line   => _line_at( $line_index, $at ),
+            filter => $at >= length $FILTER_CALL
+                && substr( $code, $at - length $FILTER_CALL, length $FILTER_CALL ) eq $FILTER_CALL ? 1 : 0,
         };
         pos($code) = $start;
     }
@@ -496,13 +532,14 @@ sub _localised {
 
 =head3 _source_lines
 
-The lines of the Template Toolkit tags of I<$content> using the variable or
-block of I<$problem>.
+The lines of the Template Toolkit tags of I<$tags> (the template with only the
+text of its tags, and its newlines) using the variable or block of
+I<$problem>.
 
 =cut
 
 sub _source_lines {
-    my ( $content, $problem ) = @_;
+    my ( $tags, $problem ) = @_;
 
     my $pattern;
     if ( $problem->{type} eq 'unknown_block' ) {
@@ -512,28 +549,55 @@ sub _source_lines {
         $pattern = qr{(?<![\w.])$path\b};
     }
 
-    # Keep the text of the tags only, and the newlines
-    ( my $tags = $content ) =~ s{(\[%.*?%\])|[^\n]}{ defined $1 ? $1 : ' ' }gse;
-
+    # Count the newlines from one match to the next only
     my @lines;
+    my ( $line, $counted ) = ( 1, 0 );
     while ( $tags =~ m{$pattern}g ) {
-        my $line = 1 + ( () = substr( $tags, 0, $-[0] ) =~ /\n/g );
+        $line += () = substr( $tags, $counted, $-[0] - $counted ) =~ /\n/g;
+        $counted = $-[0];
         push @lines, $line unless @lines && $lines[-1] == $line;
     }
     return @lines;
 }
 
+=head3 _line_index
+
+    my $line_index = _line_index($code);
+
+The positions of the '#line' comments Template::Parser adds to the compiled
+code, with their line, for L</_line_at>
+
+=cut
+
+sub _line_index {
+    my ($code) = @_;
+    my @index;
+    push @index, [ $+[0], $1 ] while $code =~ m{^#line (\d+) }mg;
+    return \@index;
+}
+
 =head3 _line_at
 
+    my $line = _line_at( $line_index, $position );
+
 The line of the template the compiled code at position I<$position> comes
-from, as given by the last '#line' comment Template::Parser adds before it.
+from, as given by the last '#line' comment Template::Parser adds before it
 
 =cut
 
 sub _line_at {
-    my ( $code, $position ) = @_;
-    my $before = substr( $code, 0, $position );
-    my ($line) = $before =~ m{.*^#line (\d+) }ms;
+    my ( $index, $position ) = @_;
+    my ( $low,   $high )     = ( 0, $#$index );
+    my $line;
+    while ( $low <= $high ) {
+        my $middle = int( ( $low + $high ) / 2 );
+        if ( $index->[$middle]->[0] <= $position ) {
+            $line = $index->[$middle]->[1];
+            $low  = $middle + 1;
+        } else {
+            $high = $middle - 1;
+        }
+    }
     return $line;
 }
 
